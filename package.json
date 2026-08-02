@@ -1,0 +1,40 @@
+{
+  "name": "freshness-kit",
+  "version": "0.1.0",
+  "description": "Make staleness self-announcing: compute a fresh/aging/stale level from a reviewed-on date against two declared thresholds, with three-state reader-facing degradation (silent, quiet note, prominent warning) instead of a page that just keeps showing old data with a straight face. Zero-dependency, framework-agnostic TypeScript.",
+  "keywords": [
+    "data-freshness",
+    "staleness",
+    "cache-invalidation",
+    "content-freshness",
+    "data-quality",
+    "honesty",
+    "ci",
+    "dbt"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
+  }
+}
