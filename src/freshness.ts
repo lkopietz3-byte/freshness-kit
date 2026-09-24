@@ -7,6 +7,9 @@ import type {
 } from './types.js'
 
 const MS_PER_DAY = 86_400_000
+// UTC+14:00 (for example Pacific/Kiritimati) is the furthest-ahead civil time
+// zone offset in the IANA database. See the future-date rule on ageInDays.
+const MAX_UTC_OFFSET_MS = 14 * 3_600_000
 
 /** Internal validation, also used for an empty dataset. */
 export function validateFreshnessContext(config: FreshnessConfig, now: Date): void {
@@ -25,7 +28,7 @@ function validateNow(now: Date): number {
   return timestamp
 }
 
-function parseReviewedOn(reviewedOn: string): number {
+function parseReviewedOn(reviewedOn: string): { instant: number; dateOnly: boolean } {
   // Restrict the input to an unambiguous calendar date or explicitly zoned
   // timestamp. Date.parse alone normalizes impossible days such as Feb 30.
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/.exec(reviewedOn)
@@ -38,9 +41,10 @@ function parseReviewedOn(reviewedOn: string): number {
   if (month < 1 || month > 12 || day < 1 || day > days[month - 1]!) {
     throw new RangeError('reviewedOn must be a real calendar date.')
   }
-  const timestamp = Date.parse(match[4] === undefined ? `${reviewedOn}T00:00:00Z` : reviewedOn)
-  if (!Number.isFinite(timestamp)) throw new RangeError('reviewedOn must be a valid date.')
-  return timestamp
+  const dateOnly = match[4] === undefined
+  const instant = Date.parse(dateOnly ? `${reviewedOn}T00:00:00Z` : reviewedOn)
+  if (!Number.isFinite(instant)) throw new RangeError('reviewedOn must be a valid date.')
+  return { instant, dateOnly }
 }
 
 /**
@@ -50,12 +54,20 @@ function parseReviewedOn(reviewedOn: string): number {
  * Throws RangeError for malformed, impossible or future review dates, or
  * an invalid clock. Bare dates mean UTC midnight; timestamps require an
  * explicit timezone. No invalid input is converted to age zero.
+ *
+ * Future dates: a timestamp is an exact instant and is rejected if it is
+ * even one millisecond after `now`. A bare date has no zone, so it is
+ * rejected only when it is later than today in every time zone (that is,
+ * when its UTC midnight is more than 14 hours after `now`); a bare date that
+ * is already today in UTC+14 is accepted and reads as age 0. This keeps a
+ * reviewer who types their local date from being rejected for part of the day.
  */
 export function ageInDays(reviewedOn: string, now: Date = new Date()): number {
   const current = validateNow(now)
-  const then = parseReviewedOn(reviewedOn)
-  if (then > current) throw new RangeError('reviewedOn must not be in the future.')
-  return Math.floor((current - then) / MS_PER_DAY)
+  const { instant, dateOnly } = parseReviewedOn(reviewedOn)
+  const latestAllowed = dateOnly ? current + MAX_UTC_OFFSET_MS : current
+  if (instant > latestAllowed) throw new RangeError('reviewedOn must not be in the future.')
+  return Math.max(0, Math.floor((current - instant) / MS_PER_DAY))
 }
 
 const defaultMessages: Record<FreshnessLevel, FreshnessMessageFn> = {
