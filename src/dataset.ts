@@ -6,7 +6,7 @@ import type {
   FreshnessMessages,
   FreshnessRecord,
 } from './types.js'
-import { assessFreshness } from './freshness.js'
+import { assessFreshness, validateFreshnessContext } from './freshness.js'
 
 const LEVEL_RANK: Record<FreshnessLevel, number> = { fresh: 0, aging: 1, stale: 2 }
 
@@ -23,6 +23,8 @@ const LEVEL_RANK: Record<FreshnessLevel, number> = { fresh: 0, aging: 1, stale: 
  *
  * An empty `records` array returns `level: 'fresh'` and `oldest: undefined`
  * — there is nothing stale about a dataset with nothing in it.
+ * Invalid date input in any record aborts the whole assessment with a
+ * RangeError. Thresholds and the clock are validated even for empty input.
  */
 export function checkDatasetFreshness(
   records: FreshnessRecord[],
@@ -30,6 +32,7 @@ export function checkDatasetFreshness(
   messages?: FreshnessMessages,
   now: Date = new Date(),
 ): DatasetFreshnessResult {
+  validateFreshnessContext(config, now)
   const evaluated: EvaluatedFreshnessRecord[] = records.map((record) => ({
     ...record,
     result: assessFreshness(record.reviewedOn, config, messages, now),

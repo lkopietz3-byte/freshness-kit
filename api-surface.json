@@ -1,0 +1,8 @@
+{
+  "freshness-kit": [
+    "ageInDays",
+    "assessFreshness",
+    "checkDatasetFreshness",
+    "freshnessBadgeText"
+  ]
+}

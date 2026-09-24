@@ -125,12 +125,57 @@ dataset.records // all three, each with its own { id, reviewedOn, result }
 
 Use `dataset.level` to gate a whole build (fail CI, or show a site-wide
 banner), and `dataset.records` to flag individual rows instead — or both.
+If any record has invalid input, the entire call throws `RangeError`; it
+does not return a partial dataset or a `fresh` fallback.
+
+## Input contract and migration
+
+`ageInDays`, `assessFreshness`, and `checkDatasetFreshness` reject invalid,
+impossible, and future review dates with `RangeError`. This is an intentional
+behavior change from the original 0.1.0 implementation, which silently
+converted malformed or future dates to age zero. Valid inputs keep the same
+result types, inclusive thresholds, messages, badges, and dataset ordering.
+
+Accepted strings are a real `YYYY-MM-DD` calendar date (UTC midnight), or
+`YYYY-MM-DDTHH:mm:ss[.fraction]Z` / `YYYY-MM-DDTHH:mm:ss[.fraction]±HH:mm`.
+Fractions have one to three digits. Hours are 00–23; minutes/seconds 00–59.
+Non-ISO formats, surrounding whitespace, timestamps without a timezone,
+24:00 and leap seconds are rejected. Explicit offsets are compared by
+instant, so a local calendar date tomorrow can be valid if its UTC instant
+is not in the future. A timestamp even one millisecond after `now` fails.
+The supplied `now` must be a valid `Date`.
+
+Thresholds must be non-negative safe integers with
+`warnAfterDays <= staleAfterDays`; zero and equal thresholds are allowed.
+Dataset calls validate thresholds and the clock even for an empty array.
+An empty valid dataset still returns `fresh` with no oldest record; that
+means no stale records were found, and is not proof that required data exists.
+
+Audit callers that previously relied on permissive parsing or clamping.
+In CI, let invalid-input errors fail the process. At a rendering boundary,
+show a visible unavailable state when an input check fails; never catch an
+error and substitute an empty badge, zero age, or `fresh`:
+
+```ts
+let warning: string
+try {
+  warning = assessFreshness(reviewedOn, config).message
+} catch (error) {
+  if (!(error instanceof RangeError)) throw error
+  warning = 'Review date unavailable. Verify this information before relying on it.'
+}
+// Render warning as text in the host application's warning area.
+```
 
 ## Rendering a badge
 
 `freshnessBadgeText` is a tiny, pure, framework-agnostic helper that turns a
 `FreshnessResult` into a short string. It returns plain text only — wrap it
 in whatever your UI actually is (a `<span>`, a Slack message, a CLI line):
+
+The formatter trusts the result from an assessment. It does not validate
+manually constructed or deserialized result objects; reassess the original
+review date and config at the current clock instead of trusting stored levels.
 
 ```ts
 import { freshnessBadgeText } from 'freshness-kit'
@@ -180,13 +225,11 @@ what a reader sees never disagree about whether the data is current.
   There's no cron, no webhook, no database. Bring your own trigger (a CI
   step, a page render, a scheduled task in whatever system you already
   use) and your own place to store `reviewedOn` dates.
-- **An unparsable `reviewedOn` is treated as 0 days old, not an error.**
-  `ageInDays` is a pure date-math helper, not a validator — it won't throw
-  on a malformed string, it will just (silently) read as brand new. If you
-  need to catch a bad date, validate it yourself before calling in (e.g.
-  `Number.isNaN(Date.parse(reviewedOn))`) — see cityplanr's
-  `last_verified is a valid date and never in the future` test for the
-  shape of that check.
+- **Invalid input stops the assessment; the host owns the visible error.**
+  This library throws rather than inventing an age or returning a fourth
+  freshness level that an existing `level === 'stale'` gate could miss.
+  Follow the input contract above when adapting existing callers. It does
+  not validate that the records array contains every required record.
 - **Two thresholds, one level ordering.** This library only supports the
   fresh → aging → stale progression with two thresholds. If you need more
   tiers, different tiers per record type, or non-linear rules, you'll need
@@ -205,4 +248,5 @@ src/
   index.ts        Barrel export
 test/
   freshness.test.ts   Boundary values, message overrides, dataset roll-up
+  invalid-input.test.ts   Invalid inputs, offsets, calendars and gate safety
 ```
