@@ -45,7 +45,35 @@ pipeline. A dbt freshness check protects the warehouse; this library
 protects the page a person is actually looking at, whether or not anything
 upstream ever re-runs.
 
+## When not to use this
+
+- You need to verify the *content* is still correct, not just measure how
+  long it's been since someone said they checked it. This library never
+  looks at the data itself — see Honest limits below.
+- You need more than two thresholds, non-linear tiers, or per-record-type
+  rules. Build on `ageInDays` directly instead of `assessFreshness`.
+- You already have a warehouse-level freshness gate (dbt's `freshness:`
+  block, for example) and only need to fail a pipeline run. That's a narrower,
+  more mature problem than this library targets; use this when you also want
+  a reader-facing signal at render time, not just a CI exit code.
+- Your `reviewedOn` values aren't trustworthy inputs (nobody actually updates
+  them). This library can't tell a genuine re-check from a bumped date.
+
 ## Install
+
+Not yet published to npm. Install straight from GitHub:
+
+```bash
+npm install github:lkopietz3-byte/freshness-kit
+```
+
+Zero runtime dependencies. ESM only (`"type": "module"`). MIT licensed. Git
+installation builds the package through its `prepare` script. Use a reviewed
+commit reference (a tag or a pinned SHA, e.g.
+`github:lkopietz3-byte/freshness-kit#<sha>`) when you need a repeatable
+dependency, since the default branch can move.
+
+To work on this repo itself instead of consuming it:
 
 ```bash
 npm install
@@ -53,8 +81,6 @@ npm test           # vitest
 npm run typecheck  # tsc --noEmit
 npm run build       # emits dist/ (ESM + .d.ts)
 ```
-
-Zero runtime dependencies. ESM only (`"type": "module"`). MIT licensed.
 
 ## Example: a single piece of data
 
@@ -71,7 +97,10 @@ const config: FreshnessConfig = {
   staleAfterDays: 45,
 }
 
-const result = assessFreshness('2026-06-01', config)
+// The 4th argument is the clock to measure age against; it defaults to
+// `new Date()`. It's pinned here so this example's output is exact and
+// reproducible — in your own code you'll normally omit it.
+const result = assessFreshness('2026-06-01', config, undefined, new Date('2026-08-02T12:00:00Z'))
 // {
 //   level: 'stale',
 //   ageDays: 62,
@@ -131,25 +160,43 @@ does not return a partial dataset or a `fresh` fallback.
 ## Input contract and migration
 
 `ageInDays`, `assessFreshness`, and `checkDatasetFreshness` reject invalid,
-impossible, and future review dates with `RangeError`. This is an intentional
-behavior change from the original 0.1.0 implementation, which silently
-converted malformed or future dates to age zero. Valid inputs keep the same
+impossible, wrong-typed, and future review dates with `RangeError`. This is
+an intentional design decision: an early draft of this library silently
+converted malformed or future dates to age zero, which let a bad date hide
+a fully stale record behind a `'fresh'` result. Valid inputs keep the same
 result types, inclusive thresholds, messages, badges, and dataset ordering.
 
 Accepted strings are a real `YYYY-MM-DD` calendar date (UTC midnight), or
 `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / `YYYY-MM-DDTHH:mm:ss[.fraction]±HH:mm`.
 Fractions have one to three digits. Hours are 00–23; minutes/seconds 00–59.
-Non-ISO formats, surrounding whitespace, timestamps without a timezone,
-24:00 and leap seconds are rejected. Explicit offsets are compared by
-instant, so a local calendar date tomorrow can be valid if its UTC instant
-is not in the future. A timestamp even one millisecond after `now` fails.
-The supplied `now` must be a valid `Date`.
+Non-ISO formats, surrounding whitespace, a lowercase `t`/`z`, timestamps
+without a timezone, missing seconds, 24:00, and leap seconds are all
+rejected — as is anything that isn't a JavaScript string, such as an array
+or a boxed `String` object, even one that would print as a valid date.
+
+Future dates are handled differently depending on whether the input carries
+a time zone. A timestamp with an explicit offset is an exact instant with no
+tolerance: it's compared to `now` by instant (so a calendar date printed as
+"tomorrow" with an offset like `+14:00` can still resolve to an instant that
+isn't in the future), but it throws if that instant is even one millisecond
+after `now`. A bare `YYYY-MM-DD` date carries no zone at all, so instead it's
+rejected only when it's later than today in *every* civil time zone — that
+is, when its UTC midnight is more than 14 hours after `now` (UTC+14 is the
+furthest-ahead zone in the IANA database). A bare date that has already
+started somewhere on Earth is accepted and reads as age zero; this keeps a
+reviewer who types their own local date from being rejected for part of the
+day just because UTC hasn't reached that date yet. The supplied `now` must
+be an actual `Date` instance with a finite time — a timestamp number, an ISO
+string, or a duck-typed `{ getTime() }` object is rejected, not coerced.
 
 Thresholds must be non-negative safe integers with
-`warnAfterDays <= staleAfterDays`; zero and equal thresholds are allowed.
-Dataset calls validate thresholds and the clock even for an empty array.
-An empty valid dataset still returns `fresh` with no oldest record; that
-means no stale records were found, and is not proof that required data exists.
+`warnAfterDays <= staleAfterDays`; zero and equal thresholds are allowed. A
+`config` that isn't an object (including `null`/`undefined`) is rejected the
+same way. Dataset calls validate thresholds and the clock even for an empty
+array, and `records` itself must be an array of objects — a non-array or a
+`null`/non-object element throws instead of crashing. An empty valid dataset
+still returns `fresh` with no oldest record; that means no stale records
+were found, and is not proof that required data exists.
 
 Audit callers that previously relied on permissive parsing or clamping.
 In CI, let invalid-input errors fail the process. At a rendering boundary,
@@ -166,6 +213,33 @@ try {
 }
 // Render warning as text in the host application's warning area.
 ```
+
+## API reference
+
+Every export, for quick scanning; see the sections above for behavior in
+context and the TSDoc on each symbol for the full contract.
+
+- **`ageInDays(reviewedOn: string, now: Date = new Date()): number`**
+  Whole days between `reviewedOn` and `now`, computed in UTC and floored,
+  never negative. Throws `RangeError` per the input contract above.
+- **`assessFreshness(reviewedOn: string, config: FreshnessConfig, messages?: FreshnessMessages, now: Date = new Date()): FreshnessResult`**
+  The main single-record entry point: computes the age and classifies it
+  into `'fresh' | 'aging' | 'stale'`, generating `message` through
+  `messages` (or the generic default for any level left out).
+- **`checkDatasetFreshness(records: FreshnessRecord[], config: FreshnessConfig, messages?: FreshnessMessages, now: Date = new Date()): DatasetFreshnessResult`**
+  Runs `assessFreshness` over every record with one shared config and rolls
+  the result up to the single worst level, still returning every per-record
+  result. Throws on the first invalid record; never returns a partial result.
+- **`freshnessBadgeText(result: FreshnessResult): string`**
+  Turns a `FreshnessResult` into a short plain-text badge (`''` when fresh).
+  Trusts its input — see the badge section below for the trust boundary.
+- **Types** — `FreshnessLevel` (`'fresh' | 'aging' | 'stale'`), `FreshnessConfig`
+  (`{ warnAfterDays, staleAfterDays }`), `FreshnessResult`
+  (`{ level, ageDays, reviewedOn, message }`), `FreshnessMessageFn`
+  (`(ageDays, reviewedOn) => string`), `FreshnessMessages` (a `Partial` map
+  of `FreshnessMessageFn` by level), `FreshnessRecord` (`{ id, reviewedOn }`),
+  `EvaluatedFreshnessRecord` (a `FreshnessRecord` plus its `result`), and
+  `DatasetFreshnessResult` (`{ level, oldest, records }`).
 
 ## Rendering a badge
 
@@ -235,6 +309,30 @@ what a reader sees never disagree about whether the data is current.
   tiers, different tiers per record type, or non-linear rules, you'll need
   to build on top of `ageInDays` directly rather than use `assessFreshness`
   as-is.
+- **The future-date check trusts the `now` you pass it.** The 14-hour bare-
+  date allowance covers real time-zone ambiguity, not a general clock-skew
+  budget. If the caller's clock itself is wrong by more than that, a
+  genuinely future-dated review can still be accepted. Pass a `now` you
+  trust (a server clock synced with NTP, not an untrusted client's).
+
+## Relationship to claims-registry-kit
+
+`claims-registry-kit` solves an adjacent problem: whether one claim, backed
+by evidence, is still trustworthy enough to call `'current'`. This library
+solves a more general one: turning any `reviewedOn` date into a three-level
+`fresh` / `aging` / `stale` signal for a page, a record, or a whole dataset,
+independent of whether "evidence" is involved at all. If what you have is a
+claim with a required evidence link and a single stale/current cutoff,
+`claims-registry-kit` is the closer fit; if you have a review date and want
+a graduated, reader-facing warning, use this library instead.
+
+The two libraries currently disagree on how much future slack a date gets:
+`claims-registry-kit` allows any `verifiedAt` (bare date or full timestamp)
+up to a flat 24 hours ahead of `now`, while this library allows a bare date
+up to 14 hours ahead (tied to the real UTC+14 time-zone limit) but gives an
+explicit-offset timestamp no slack at all. Both are defensible, but a caller
+using both kits should not assume they draw the future-date line in the same
+place.
 
 ## Files
 
@@ -247,6 +345,8 @@ src/
   badge.ts        freshnessBadgeText
   index.ts        Barrel export
 test/
-  freshness.test.ts   Boundary values, message overrides, dataset roll-up
-  invalid-input.test.ts   Invalid inputs, offsets, calendars and gate safety
+  freshness.test.ts     Boundary values, message overrides, dataset roll-up
+  invalid-input.test.ts Invalid inputs, offsets, calendars and gate safety
+  future-dates.test.ts  The bare-date "today somewhere on Earth" allowance
+  wrong-types.test.ts   Wrong runtime types at every entry point
 ```

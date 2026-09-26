@@ -8,6 +8,15 @@ is `src/index.ts`; the package export resolves to generated `dist/index.js`.
 
 - `ageInDays` parses unambiguous real dates and rejects future instants and
   invalid clocks before arithmetic; it never converts bad dates to zero.
+- Future-date tolerance is asymmetric by design: a bare `YYYY-MM-DD` date has
+  no zone, so it is accepted up to 14 hours ahead of `now` (UTC+14 is the
+  furthest-ahead civil offset) and floors to age 0; an explicit-offset
+  timestamp is an exact instant with zero tolerance. Do not unify these
+  without re-deriving the 14-hour constant from the IANA database.
+- Every entry point rejects the wrong runtime type instead of coercing or
+  crashing: non-string `reviewedOn`, non-object `config`, non-`Date` `now`,
+  non-array `records`, and non-object dataset entries all throw `RangeError`,
+  never `TypeError` and never a silent accept (see test/wrong-types.test.ts).
 - `assessFreshness` validates thresholds before classifying. Valid results
   retain fresh/aging/stale and inclusive boundary behavior.
 - `checkDatasetFreshness` aborts if any record is invalid. An empty dataset
