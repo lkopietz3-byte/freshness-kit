@@ -12,6 +12,7 @@ describe('invalid dates cannot become a silent freshness result', () => {
     '08/02/2026', '2026-08-02T11:00:00', '2026-08-01T24:00:00Z',
     '2026-08-01T11:60:00Z', '2026-08-01T11:00:60Z', '2026-08-01T00:00:00+24:00',
     ' 2026-08-02 ', '2026-08-02\n', '2026-08-01T12:00:00.1234Z',
+    '2026-08-02t12:00:00z', '2026-08-02T12:00Z',
   ])('rejects %j through age, assessment, badge composition and mixed datasets', (date) => {
     expect(() => ageInDays(date, NOW)).toThrow(RangeError)
     expect(() => assessFreshness(date, CONFIG, undefined, NOW)).toThrow(RangeError)
@@ -21,7 +22,7 @@ describe('invalid dates cannot become a silent freshness result', () => {
     }
   })
 
-  it.each(['2026-08-02T12:00:00Z', '2026-08-02T07:00:00-05:00', '2026-08-03T02:00:00+14:00'])('compares explicit offsets by instant: %s', (date) => {
+  it.each(['2026-08-02T12:00:00Z', '2026-08-02T07:00:00-05:00', '2026-08-03T02:00:00+14:00', '2026-08-02T21:30:00+09:30'])('compares explicit offsets by instant: %s', (date) => {
     expect(ageInDays(date, NOW)).toBe(0)
     expect(assessFreshness(date, CONFIG, undefined, NOW).level).toBe('fresh')
   })
