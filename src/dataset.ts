@@ -25,6 +25,9 @@ const LEVEL_RANK: Record<FreshnessLevel, number> = { fresh: 0, aging: 1, stale: 
  * — there is nothing stale about a dataset with nothing in it.
  * Invalid date input in any record aborts the whole assessment with a
  * RangeError. Thresholds and the clock are validated even for empty input.
+ * `records` itself must be an array of objects; a non-array (including
+ * `null`/`undefined`) or a non-object element throws RangeError rather than
+ * crashing with a TypeError from a missing `.map` or property access.
  */
 export function checkDatasetFreshness(
   records: FreshnessRecord[],
@@ -33,10 +36,18 @@ export function checkDatasetFreshness(
   now: Date = new Date(),
 ): DatasetFreshnessResult {
   validateFreshnessContext(config, now)
-  const evaluated: EvaluatedFreshnessRecord[] = records.map((record) => ({
-    ...record,
-    result: assessFreshness(record.reviewedOn, config, messages, now),
-  }))
+  if (!Array.isArray(records)) {
+    throw new RangeError('records must be an array of { id, reviewedOn } objects.')
+  }
+  const evaluated: EvaluatedFreshnessRecord[] = records.map((record) => {
+    if (record === null || typeof record !== 'object') {
+      throw new RangeError('Each dataset record must be an object with an id and reviewedOn.')
+    }
+    return {
+      ...record,
+      result: assessFreshness(record.reviewedOn, config, messages, now),
+    }
+  })
 
   let oldest: EvaluatedFreshnessRecord | undefined
   for (const record of evaluated) {

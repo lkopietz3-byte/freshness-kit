@@ -13,6 +13,12 @@ const MAX_UTC_OFFSET_MS = 14 * 3_600_000
 
 /** Internal validation, also used for an empty dataset. */
 export function validateFreshnessContext(config: FreshnessConfig, now: Date): void {
+  // Reject a missing or non-object config before reading its fields: a
+  // property access on `null`/`undefined` throws TypeError, not our
+  // documented RangeError.
+  if (config === null || typeof config !== 'object') {
+    throw new RangeError('Freshness config must be an object with warnAfterDays and staleAfterDays.')
+  }
   if (
     !Number.isSafeInteger(config.warnAfterDays) || config.warnAfterDays < 0 ||
     !Number.isSafeInteger(config.staleAfterDays) || config.staleAfterDays < config.warnAfterDays
@@ -23,12 +29,24 @@ export function validateFreshnessContext(config: FreshnessConfig, now: Date): vo
 }
 
 function validateNow(now: Date): number {
+  // `instanceof Date` first: a plain number, string, or duck-typed
+  // `{ getTime() }` object must not slip through property-access coercion
+  // (calling a missing `.getTime` throws TypeError, not our RangeError; a
+  // Date-shaped fake would otherwise pass silently).
+  if (!(now instanceof Date)) throw new RangeError('Freshness now must be a valid Date.')
   const timestamp = now.getTime()
   if (!Number.isFinite(timestamp)) throw new RangeError('Freshness now must be a valid Date.')
   return timestamp
 }
 
 function parseReviewedOn(reviewedOn: string): { instant: number; dateOnly: boolean } {
+  // A non-string must be rejected before it reaches the regex: RegExp#exec
+  // coerces its argument with ToString, so a one-element array or a boxed
+  // `String` object would otherwise stringify into a lookalike date and be
+  // silently accepted instead of rejected.
+  if (typeof reviewedOn !== 'string') {
+    throw new RangeError('reviewedOn must be a string in YYYY-MM-DD or ISO timestamp format.')
+  }
   // Restrict the input to an unambiguous calendar date or explicitly zoned
   // timestamp. Date.parse alone normalizes impossible days such as Feb 30.
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/.exec(reviewedOn)
