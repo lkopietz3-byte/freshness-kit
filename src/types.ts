@@ -21,7 +21,8 @@
 export type FreshnessLevel = 'fresh' | 'aging' | 'stale'
 
 /**
- * The two thresholds (in whole days) that turn an age into a level.
+ * The two thresholds (non-negative safe integer days) that turn an age
+ * into a level. warnAfterDays must not exceed staleAfterDays.
  *
  * `warnAfterDays` is the boundary between 'fresh' and 'aging'; an item is
  * still 'fresh' AT exactly warnAfterDays, and becomes 'aging' the day after.

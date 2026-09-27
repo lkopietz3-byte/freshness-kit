@@ -8,6 +8,8 @@ import type { FreshnessResult } from './types.js'
  *
  * 'fresh' returns an empty string, matching `FreshnessResult.message`: the
  * honest default is to render nothing when there's nothing to say.
+ * This formatter trusts a result from assessFreshness/checkDatasetFreshness;
+ * it does not validate manually constructed or deserialized result objects.
  */
 export function freshnessBadgeText(result: FreshnessResult): string {
   switch (result.level) {

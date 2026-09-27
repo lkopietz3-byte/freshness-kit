@@ -29,8 +29,8 @@ describe('ageInDays', () => {
     expect(ageInDays(reviewedOn, NOW)).toBe(10)
   })
 
-  it('never returns negative, even for a reviewedOn date in the future', () => {
-    expect(ageInDays(daysAgo(-5), NOW)).toBe(0)
+  it('rejects future review dates instead of making them look fresh', () => {
+    expect(() => ageInDays(daysAgo(-5), NOW)).toThrow(RangeError)
   })
 
   it('is UTC-safe for a bare YYYY-MM-DD date', () => {

@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] — Unreleased
+
+First release. Not yet published to npm; install from GitHub (see README).
+
+### Added
+
+- `FreshnessLevel`, `FreshnessConfig`, `FreshnessResult`, `FreshnessMessageFn`,
+  `FreshnessMessages`, `FreshnessRecord`, `EvaluatedFreshnessRecord`, and
+  `DatasetFreshnessResult` types.
+- `ageInDays` and `assessFreshness` for turning a `reviewedOn` date and a
+  pair of thresholds into a whole-day age and a `'fresh' | 'aging' | 'stale'`
+  level, with caller-overridable reader-facing messages.
+- `checkDatasetFreshness` for rolling many records, each with its own
+  `reviewedOn`, up to a single worst-case level while still returning every
+  per-record result.
+- `freshnessBadgeText` for rendering a `FreshnessResult` as a short,
+  framework-agnostic badge string.
+- Strict input validation throughout: `reviewedOn` must be a real
+  `YYYY-MM-DD` calendar date or an ISO timestamp with seconds and an
+  explicit timezone; thresholds must be non-negative safe integers with
+  `warnAfterDays <= staleAfterDays`; `now` must be a genuine `Date` with a
+  finite time; `records` must be an array of objects. Malformed, impossible,
+  wrong-typed, or future review dates throw `RangeError` instead of being
+  silently treated as age zero or a fresh result.
+- A bare `YYYY-MM-DD` date carries no time zone, so it is accepted (and
+  reads as age zero) as long as it is not later than today in every civil
+  time zone — its UTC midnight may be up to 14 hours ahead of `now`. A
+  timestamp with an explicit offset is an exact instant and has no such
+  allowance: it throws if it is even one millisecond after `now`.
+- Zero runtime dependencies. ESM only.

@@ -7,28 +7,85 @@ import type {
 } from './types.js'
 
 const MS_PER_DAY = 86_400_000
+// UTC+14:00 (for example Pacific/Kiritimati) is the furthest-ahead civil time
+// zone offset in the IANA database. See the future-date rule on ageInDays.
+const MAX_UTC_OFFSET_MS = 14 * 3_600_000
 
-// A bare calendar date ('2026-07-20') is already UTC midnight per the ISO
-// 8601 / Date.parse spec, but appending an explicit UTC time makes that
-// non-obvious fact impossible to get wrong on a machine in a non-UTC
-// timezone. A string that already carries a time or offset is left alone.
-function toParsableIso(dateStr: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? `${dateStr}T00:00:00Z` : dateStr
+/** Internal validation, also used for an empty dataset. */
+export function validateFreshnessContext(config: FreshnessConfig, now: Date): void {
+  // Reject a missing or non-object config before reading its fields: a
+  // property access on `null`/`undefined` throws TypeError, not our
+  // documented RangeError.
+  if (config === null || typeof config !== 'object') {
+    throw new RangeError('Freshness config must be an object with warnAfterDays and staleAfterDays.')
+  }
+  if (
+    !Number.isSafeInteger(config.warnAfterDays) || config.warnAfterDays < 0 ||
+    !Number.isSafeInteger(config.staleAfterDays) || config.staleAfterDays < config.warnAfterDays
+  ) {
+    throw new RangeError('Freshness thresholds must be non-negative safe integers with warnAfterDays <= staleAfterDays.')
+  }
+  validateNow(now)
+}
+
+function validateNow(now: Date): number {
+  // `instanceof Date` first: a plain number, string, or duck-typed
+  // `{ getTime() }` object must not slip through property-access coercion
+  // (calling a missing `.getTime` throws TypeError, not our RangeError; a
+  // Date-shaped fake would otherwise pass silently).
+  if (!(now instanceof Date)) throw new RangeError('Freshness now must be a valid Date.')
+  const timestamp = now.getTime()
+  if (!Number.isFinite(timestamp)) throw new RangeError('Freshness now must be a valid Date.')
+  return timestamp
+}
+
+function parseReviewedOn(reviewedOn: string): { instant: number; dateOnly: boolean } {
+  // A non-string must be rejected before it reaches the regex: RegExp#exec
+  // coerces its argument with ToString, so a one-element array or a boxed
+  // `String` object would otherwise stringify into a lookalike date and be
+  // silently accepted instead of rejected.
+  if (typeof reviewedOn !== 'string') {
+    throw new RangeError('reviewedOn must be a string in YYYY-MM-DD or ISO timestamp format.')
+  }
+  // Restrict the input to an unambiguous calendar date or explicitly zoned
+  // timestamp. Date.parse alone normalizes impossible days such as Feb 30.
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/.exec(reviewedOn)
+  if (!match) throw new RangeError('reviewedOn must be YYYY-MM-DD or an ISO timestamp with seconds and an explicit timezone.')
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]!) {
+    throw new RangeError('reviewedOn must be a real calendar date.')
+  }
+  const dateOnly = match[4] === undefined
+  const instant = Date.parse(dateOnly ? `${reviewedOn}T00:00:00Z` : reviewedOn)
+  if (!Number.isFinite(instant)) throw new RangeError('reviewedOn must be a valid date.')
+  return { instant, dateOnly }
 }
 
 /**
  * Whole days between `reviewedOn` and `now`, computed in UTC, floored, never
  * negative.
  *
- * An unparsable `reviewedOn` is treated as 0 days old rather than throwing —
- * this is a pure formatting/math helper, not a validator. Validate dates
- * before they reach this library if you need to catch malformed input (see
- * the README's Honest limits section).
+ * Throws RangeError for malformed, impossible or future review dates, or
+ * an invalid clock. Bare dates mean UTC midnight; timestamps require an
+ * explicit timezone. No invalid input is converted to age zero.
+ *
+ * Future dates: a timestamp is an exact instant and is rejected if it is
+ * even one millisecond after `now`. A bare date has no zone, so it is
+ * rejected only when it is later than today in every time zone (that is,
+ * when its UTC midnight is more than 14 hours after `now`); a bare date that
+ * is already today in UTC+14 is accepted and reads as age 0. This keeps a
+ * reviewer who types their local date from being rejected for part of the day.
  */
 export function ageInDays(reviewedOn: string, now: Date = new Date()): number {
-  const then = Date.parse(toParsableIso(reviewedOn))
-  if (Number.isNaN(then)) return 0
-  return Math.max(0, Math.floor((now.getTime() - then) / MS_PER_DAY))
+  const current = validateNow(now)
+  const { instant, dateOnly } = parseReviewedOn(reviewedOn)
+  const latestAllowed = dateOnly ? current + MAX_UTC_OFFSET_MS : current
+  if (instant > latestAllowed) throw new RangeError('reviewedOn must not be in the future.')
+  return Math.max(0, Math.floor((current - instant) / MS_PER_DAY))
 }
 
 const defaultMessages: Record<FreshnessLevel, FreshnessMessageFn> = {
@@ -47,6 +104,8 @@ const defaultMessages: Record<FreshnessLevel, FreshnessMessageFn> = {
  * Level boundaries: 'fresh' through and including warnAfterDays, 'aging'
  * from warnAfterDays + 1 through and including staleAfterDays, 'stale' from
  * staleAfterDays + 1 on.
+ * Throws RangeError for invalid thresholds, date input or clock; callers
+ * must surface an unavailable warning or fail their gate, not substitute fresh.
  */
 export function assessFreshness(
   reviewedOn: string,
@@ -54,6 +113,7 @@ export function assessFreshness(
   messages?: FreshnessMessages,
   now: Date = new Date(),
 ): FreshnessResult {
+  validateFreshnessContext(config, now)
   const ageDays = ageInDays(reviewedOn, now)
   const level: FreshnessLevel =
     ageDays > config.staleAfterDays ? 'stale' : ageDays > config.warnAfterDays ? 'aging' : 'fresh'
