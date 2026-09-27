@@ -44,14 +44,15 @@ badges. The invalid-input regression must fail on the original source.
 
 ## Release and rollback
 
-The stricter input contract is behavior-breaking for callers relying on old
-permissive parsing. Before publishing, choose the appropriate new version,
-audit actual consumers, test a packed artifact in a clean consumer on the
-declared supported Node versions, and verify the host's visible unavailable
-path. No runtime support matrix or clean CI gate is certified by local tests.
-No publication or deployment is authorized by this contract.
+`npm run verify` (lint, typecheck, test, build, verify:package) runs
+automatically before publish via the `prepublishOnly` script. This is the
+first release, so there is no installed base yet; from the next release on,
+treat any change to input-validation strictness as behavior-breaking, call
+it out in `CHANGELOG.md`, and test the packed tarball in a clean consumer on
+the declared supported Node versions first.
 
-Keep the previous source revision and generated distribution identifiable.
-If reverting a release, validate inputs in the host first: reverting to the
-original parser restores its silent-fresh defect. A source patch alone does
-not update an installed consumer or deployed package.
+npm allows `npm unpublish` only within 72 hours of publishing, so prefer
+publishing a fixed patch version over trying to unpublish a bad release. If
+a future change ever reverts the strict input validation, note that the
+original permissive parser silently treated invalid input as fresh — that
+defect returns with it.
