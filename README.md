@@ -56,17 +56,11 @@ upstream ever re-runs.
 
 ## Install
 
-Not yet published to npm. Install straight from GitHub:
-
 ```bash
-npm install github:lkopietz3-byte/freshness-kit
+npm install freshness-kit
 ```
 
-Zero runtime dependencies. ESM only (`"type": "module"`). MIT licensed. Git
-installation builds the package through its `prepare` script. Use a reviewed
-commit reference (a tag or a pinned SHA, e.g.
-`github:lkopietz3-byte/freshness-kit#<sha>`) when you need a repeatable
-dependency, since the default branch can move.
+Zero runtime dependencies. ESM only (`"type": "module"`). MIT licensed.
 
 To work on this repo itself instead of consuming it:
 
