@@ -60,7 +60,9 @@ upstream ever re-runs.
 npm install freshness-kit
 ```
 
-Zero runtime dependencies. ESM only (`"type": "module"`). MIT licensed.
+Zero runtime dependencies. Ships as ESM (`"type": "module"`); `require()`
+also works on Node versions that support `require(esm)` (20.19+, 22.12+).
+MIT licensed.
 
 To work on this repo itself instead of consuming it:
 
