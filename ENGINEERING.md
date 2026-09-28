@@ -71,6 +71,10 @@ not, even after an unpublish. Treat unpublish as unavailable: prefer fixing forw
 patch version, and use `npm deprecate <name>@"<range>" "<message>"` to warn consumers off a
 bad release while it stays installable for anyone already pinned to it.
 
+If a future change ever reverts the strict input-validation behavior, note that the
+original permissive parser silently treated invalid input as fresh — that defect returns
+with it.
+
 ### Runtime support policy
 
 - **Supported (recommended for production):** Node 22 and 24 LTS; Node 26 current.
