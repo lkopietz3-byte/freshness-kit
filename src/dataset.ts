@@ -39,15 +39,28 @@ export function checkDatasetFreshness(
   if (!Array.isArray(records)) {
     throw new RangeError('records must be an array of { id, reviewedOn } objects.')
   }
-  const evaluated: EvaluatedFreshnessRecord[] = records.map((record) => {
-    if (record === null || typeof record !== 'object') {
-      throw new RangeError('Each dataset record must be an object with an id and reviewedOn.')
+  // One indexed pass over every numeric slot, so a hole (which `.map` and
+  // `.forEach` skip but `for...of` and spread visit as `undefined`) is
+  // rejected instead of skipped. Each entry is read once and copied, and the
+  // copy is what gets validated, assessed and returned.
+  const length = records.length
+  const snapshot: FreshnessRecord[] = []
+  for (let index = 0; index < length; index++) {
+    // `hasOwn`, not `in` or a bare read: a hole must not be filled from an
+    // inherited Array.prototype entry.
+    if (!Object.hasOwn(records, index)) {
+      throw new RangeError(`records[${index}] is a hole in a sparse array; every slot must be a { id, reviewedOn } object.`)
     }
-    return {
-      ...record,
-      result: assessFreshness(record.reviewedOn, config, messages, now),
+    const entry: unknown = records[index]
+    if (entry === null || typeof entry !== 'object') {
+      throw new RangeError(`records[${index}] must be an object with an id and reviewedOn.`)
     }
-  })
+    snapshot.push({ ...entry } as FreshnessRecord)
+  }
+  const evaluated: EvaluatedFreshnessRecord[] = snapshot.map((record) => ({
+    ...record,
+    result: assessFreshness(record.reviewedOn, config, messages, now),
+  }))
 
   let oldest: EvaluatedFreshnessRecord | undefined
   for (const record of evaluated) {
