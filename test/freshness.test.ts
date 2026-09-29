@@ -132,8 +132,26 @@ describe('freshnessBadgeText', () => {
     expect(freshnessBadgeText(assessFreshness(daysAgo(0), CONFIG, undefined, NOW))).toBe('')
   })
 
-  it('mentions the age for aging and stale', () => {
-    expect(freshnessBadgeText(assessFreshness(daysAgo(20), CONFIG, undefined, NOW))).toContain('20d')
-    expect(freshnessBadgeText(assessFreshness(daysAgo(90), CONFIG, undefined, NOW))).toContain('90d')
+  // The input is a review date, not an update date, so the badge says
+  // "reviewed" (FK-003). A review can confirm content that never changed.
+  it('says "Reviewed Nd ago" for aging', () => {
+    expect(freshnessBadgeText(assessFreshness(daysAgo(20), CONFIG, undefined, NOW))).toBe('Reviewed 20d ago')
+    expect(freshnessBadgeText(assessFreshness(daysAgo(15), CONFIG, undefined, NOW))).toBe('Reviewed 15d ago')
+    expect(freshnessBadgeText(assessFreshness(daysAgo(45), CONFIG, undefined, NOW))).toBe('Reviewed 45d ago')
+  })
+
+  it('says "Stale — last reviewed Nd ago" for stale', () => {
+    expect(freshnessBadgeText(assessFreshness(daysAgo(62), CONFIG, undefined, NOW))).toBe(
+      'Stale — last reviewed 62d ago',
+    )
+    expect(freshnessBadgeText(assessFreshness(daysAgo(46), CONFIG, undefined, NOW))).toBe(
+      'Stale — last reviewed 46d ago',
+    )
+  })
+
+  it('never says "updated"', () => {
+    for (const age of [15, 62]) {
+      expect(freshnessBadgeText(assessFreshness(daysAgo(age), CONFIG, undefined, NOW))).not.toMatch(/updated/i)
+    }
   })
 })
