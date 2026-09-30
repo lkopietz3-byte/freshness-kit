@@ -21,10 +21,12 @@ is `src/index.ts`; the package export resolves to generated `dist/index.js`.
   function, or a message function that returns a non-string.
 - Inputs are read once. `records` is walked in one indexed pass that rejects
   holes and non-objects (`.map` would skip a hole and `for...of` would visit
-  it), each entry is copied, and `config`, `messages` and `now` are snapshotted.
+  it), each entry is copied (own enumerable fields, plus `id` and `reviewedOn`
+  read once each so class getters and inherited fields keep working), and
+  `config`, `messages` and `now` are snapshotted.
   What is validated is what is assessed and returned; no message callback runs
   until every record has passed (test/sparse-datasets.test.ts,
-  test/single-read.test.ts).
+  test/single-read.test.ts, test/accessor-records.test.ts).
 - `assessFreshness` validates thresholds before classifying. Valid results
   retain fresh/aging/stale and inclusive boundary behavior.
 - `checkDatasetFreshness` aborts if any record is invalid. An empty dataset

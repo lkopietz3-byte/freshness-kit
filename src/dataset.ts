@@ -25,8 +25,10 @@ import { classify, readFreshnessContext, readMessages, renderMessage } from './f
  *
  * Every input is read once, up front: `config`, `messages` and `now` once
  * each, and every slot of `records` in a single indexed pass. Each entry is
- * copied (own enumerable properties, so extra fields survive), and the copy is
- * what is validated, assessed and returned. Later changes to the caller's
+ * copied: its own enumerable properties (so extra fields survive) plus `id` and
+ * `reviewedOn`, which are each read once with a normal property read, so a
+ * class getter or an inherited field works. The copy is what is validated,
+ * assessed and returned. Later changes to the caller's
  * objects, including from inside a message callback, cannot affect the result.
  * No message callback runs until every record has been checked, so a rejected
  * dataset produces no callbacks and no partial result.
@@ -68,7 +70,16 @@ export function checkDatasetFreshness(
     if (entry === null || typeof entry !== 'object') {
       throw new RangeError(`records[${index}] must be an object with an id and reviewedOn.`)
     }
-    snapshot.push({ ...entry } as FreshnessRecord)
+    // `id` and `reviewedOn` are read here, once each, with a normal property
+    // read, so a class getter or an inherited field works and a getter that
+    // changes its answer is only asked once. They are left out of the rest-copy
+    // (which reads own enumerable properties), so an own enumerable getter is
+    // not read a second time, and are stored on the copy as plain data.
+    const { id, reviewedOn, ...rest } = entry as Record<string, unknown>
+    const copy = { ...rest, reviewedOn } as Record<string, unknown>
+    // Only when the entry has an id at all; a record without one stays without.
+    if ('id' in entry) copy.id = id
+    snapshot.push(copy as unknown as FreshnessRecord)
   }
 
   // Classify every record before any message callback runs.

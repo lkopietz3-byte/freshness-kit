@@ -68,6 +68,8 @@ export type FreshnessMessages = Partial<Record<FreshnessLevel, FreshnessMessageF
 /**
  * One record in a dataset: whatever identifies it, plus its own reviewed-on
  * date. Extra own enumerable fields are copied through to the evaluated record.
+ * `id` and `reviewedOn` may be class getters or inherited properties; they are
+ * read once and returned as plain fields.
  * The library does not check that `id` is present or unique.
  */
 export interface FreshnessRecord {
