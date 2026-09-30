@@ -60,9 +60,21 @@ upstream ever re-runs.
 npm install freshness-kit
 ```
 
-Zero runtime dependencies. Ships as ESM (`"type": "module"`); `require()`
-also works on Node versions that support `require(esm)` (20.19+, 22.12+).
-MIT licensed.
+Zero runtime dependencies. Ships TypeScript declarations. MIT licensed.
+
+It is an ESM package (`"type": "module"`). `import` is the supported way to
+load it. `require()` also works where Node can `require(esm)`:
+
+| How you load it | Node 20.19+ | Node 22.12+ | Node 24 and 26 | Older Node 20 or 22 |
+| --- | --- | --- | --- | --- |
+| `import { assessFreshness } from 'freshness-kit'` | works | works | works | works |
+| `require('freshness-kit')` | works | works | works | fails (no `require(esm)`); use `import()` |
+
+Recommended runtimes are Node 22 and 24 (LTS) and Node 26 (current). Node 20 is
+end-of-life. CI still runs the tests and the installed-package probes on Node
+20.19.0 and 22.12.0 (the `require(esm)` floors) to catch regressions, but that
+is compatibility testing, not a recommendation. `engines` in `package.json` is
+`>=20`.
 
 To work on this repo itself instead of consuming it:
 
@@ -105,18 +117,27 @@ if (result.level !== "fresh") {
 }
 ```
 
-The returned `ageDays` depends on the date when the function runs. For example, the original illustrative output of `62` days corresponds to a run **as of 2026-08-02** with `reviewedOn: "2026-06-01"`; it is a dated example, not a value to expect from a run today. The level and message should be computed from the current call result.
+The `62` is a dated result: it is the age as of 2026-08-02. Without the pinned
+clock, `ageDays` is measured against the moment the function runs.
 
 Override any subset of the default messages when the UI needs domain-specific wording:
 
 ```ts
-const resultWithCopy = assessFreshness("2026-06-01", config, {
-  stale: (ageDays) =>
-    `Last verified ${ageDays} days ago. Confirm the current number before relying on it.`,
-});
+const resultWithCopy = assessFreshness(
+  "2026-06-01",
+  config,
+  {
+    stale: (ageDays) =>
+      `Last verified ${ageDays} days ago. Confirm the current number before relying on it.`,
+  },
+  new Date("2026-08-02T12:00:00Z"), // pinned, as above
+);
+console.log(resultWithCopy.message);
+// Last verified 62 days ago. Confirm the current number before relying on it.
 ```
 
-Unspecified messages use the generic defaults.
+Unspecified messages use the generic defaults. Each override must be a
+function that returns a string; see the input contract below.
 
 ## Assess a dataset
 
@@ -132,17 +153,27 @@ const dataset = checkDatasetFreshness(
     { id: "austin", reviewedOn: "2026-07-30" },
   ],
   { warnAfterDays: 14, staleAfterDays: 45 },
+  undefined, // no message overrides
+  new Date("2026-08-02T12:00:00Z"), // pinned so this output is exact
 );
 
-console.log(dataset.level); // The least fresh record determines the level.
-console.log(dataset.oldest?.id);
-console.log(dataset.records); // Each record and its individual result.
+console.log(dataset.level); // 'stale': the least fresh record determines the level.
+console.log(dataset.oldest?.id); // 'lisbon' (92 days)
+console.log(dataset.records.map((r) => [r.id, r.result.level, r.result.ageDays]));
+// [ [ 'omaha', 'fresh', 13 ], [ 'lisbon', 'stale', 92 ], [ 'austin', 'fresh', 3 ] ]
 ```
+
+`oldest` is the record with the largest `ageDays`; if several tie, the first of
+them in input order.
 
 Use `dataset.level` to gate a whole build (fail CI, or show a site-wide
 banner), and `dataset.records` to flag individual rows instead — or both.
 If any record has invalid input, the entire call throws `RangeError`; it
-does not return a partial dataset or a `fresh` fallback.
+does not return a partial dataset or a `fresh` fallback. That includes a
+sparse array: a hole such as `new Array(1)` or `[a, , b]` throws
+`RangeError: records[0] is a hole in a sparse array; ...` instead of being
+skipped. The empty array `[]` is the one dataset with nothing to check: it
+returns `level: 'fresh'` and `oldest: undefined`.
 
 ## Input contract and migration
 
@@ -185,6 +216,22 @@ array, and `records` itself must be an array of objects — a non-array or a
 still returns `fresh` with no oldest record; that means no stale records
 were found, and is not proof that required data exists.
 
+Inputs are read once. `checkDatasetFreshness` walks every slot of `records`
+in one indexed pass and copies each entry (own enumerable properties, so extra
+fields on a record survive), and `config`, `messages` and `now` are each read
+once per call. What gets validated is exactly what gets assessed and returned:
+a getter, a Proxy or a message callback that changes the caller's objects
+afterward cannot change the result. No message callback runs until every record
+has been checked, so a rejected dataset produces no callbacks.
+
+The `messages` argument must be `undefined` or a plain object (a Map, a class
+instance or `null` throws `RangeError` instead of being silently ignored); only
+its own `fresh`, `aging` and `stale` entries are used. Each entry must be
+`undefined` (use the default) or a function, and the function that runs must
+return a string. A bad entry or return value throws `TypeError`, because that
+is a bug in the caller's code and not bad input data. Every other rejection
+above is a `RangeError`.
+
 Audit callers that previously relied on permissive parsing or clamping.
 In CI, let invalid-input errors fail the process. At a rendering boundary,
 show a visible unavailable state when an input check fails; never catch an
@@ -212,18 +259,21 @@ context and the TSDoc on each symbol for the full contract.
 - **`assessFreshness(reviewedOn: string, config: FreshnessConfig, messages?: FreshnessMessages, now: Date = new Date()): FreshnessResult`**
   The main single-record entry point: computes the age and classifies it
   into `'fresh' | 'aging' | 'stale'`, generating `message` through
-  `messages` (or the generic default for any level left out).
+  `messages` (or the generic default for any level left out). `RangeError` for
+  bad input, `TypeError` for a bad message function.
 - **`checkDatasetFreshness(records: FreshnessRecord[], config: FreshnessConfig, messages?: FreshnessMessages, now: Date = new Date()): DatasetFreshnessResult`**
   Runs `assessFreshness` over every record with one shared config and rolls
   the result up to the single worst level, still returning every per-record
-  result. Throws on the first invalid record; never returns a partial result.
+  result. Throws on an invalid record or a hole in `records`; never returns a
+  partial result. `[]` returns `level: 'fresh'` with `oldest: undefined`.
 - **`freshnessBadgeText(result: FreshnessResult): string`**
-  Turns a `FreshnessResult` into a short plain-text badge (`''` when fresh).
+  Turns a `FreshnessResult` into a short plain-text badge: `''` when fresh,
+  `Reviewed 20d ago` when aging, `Stale — last reviewed 62d ago` when stale.
   Trusts its input — see the badge section below for the trust boundary.
 - **Types** — `FreshnessLevel` (`'fresh' | 'aging' | 'stale'`), `FreshnessConfig`
   (`{ warnAfterDays, staleAfterDays }`), `FreshnessResult`
   (`{ level, ageDays, reviewedOn, message }`), `FreshnessMessageFn`
-  (`(ageDays, reviewedOn) => string`), `FreshnessMessages` (a `Partial` map
+  (`(ageDays, reviewedOn) => string`, must return a string), `FreshnessMessages` (a `Partial` map
   of `FreshnessMessageFn` by level), `FreshnessRecord` (`{ id, reviewedOn }`),
   `EvaluatedFreshnessRecord` (a `FreshnessRecord` plus its `result`), and
   `DatasetFreshnessResult` (`{ level, oldest, records }`).
@@ -237,14 +287,18 @@ review date and config at the current clock instead of trusting stored levels.
 ```ts
 import { freshnessBadgeText } from "freshness-kit";
 
-console.log(freshnessBadgeText(result));
+console.log(freshnessBadgeText(result)); // 'Stale — last reviewed 62d ago' for the 62-day result above
 ```
 
-The helper returns plain text for you to place in a page, message, or CLI output.
+The helper returns plain text for you to place in a page, message, or CLI
+output: `''` when fresh, `Reviewed 20d ago` when aging, `Stale — last reviewed
+62d ago` when stale. The wording says "reviewed" because the input is a review
+date; a review can confirm content that never changed.
 
 ## Run as a CI check
 
-The library does not schedule work. A script can call `checkDatasetFreshness` and fail a build when your data exceeds the policy you chose:
+The library does not schedule work. Unlike the pinned examples above, this
+script wants the real clock, so it omits `now`. A script can call `checkDatasetFreshness` and fail a build when your data exceeds the policy you chose:
 
 ```ts
 import { checkDatasetFreshness } from "freshness-kit";
@@ -263,7 +317,7 @@ if (dataset.level === "stale") {
 
 The same assessment can be used when rendering a page. Choose thresholds that fit the data and explain the resulting status to readers.
 
-## Modules
+## Honest limits
 
 - **This computes staleness from a `reviewedOn` date you supply. It cannot
   verify that the underlying data is still accurate.** A record with a
@@ -286,7 +340,12 @@ The same assessment can be used when rendering a page. Choose thresholds that fi
   This library throws rather than inventing an age or returning a fourth
   freshness level that an existing `level === 'stale'` gate could miss.
   Follow the input contract above when adapting existing callers. It does
-  not validate that the records array contains every required record.
+  not validate that the records array contains every required record, and it
+  does not check that record ids are present or unique.
+- **The badge trusts the result it is given.** `freshnessBadgeText` formats
+  whatever `FreshnessResult` you pass; it does not validate a hand-built or
+  deserialized one. Reassess from the original date rather than storing a
+  level and re-rendering it later: a stored level does not age.
 - **Two thresholds, one level ordering.** This library only supports the
   fresh → aging → stale progression with two thresholds. If you need more
   tiers, different tiers per record type, or non-linear rules, you'll need
@@ -309,27 +368,22 @@ claim with a required evidence link and a single stale/current cutoff,
 `claims-registry-kit` is the closer fit; if you have a review date and want
 a graduated, reader-facing warning, use this library instead.
 
-The two libraries currently disagree on how much future slack a date gets:
-`claims-registry-kit` allows any `verifiedAt` (bare date or full timestamp)
-up to a flat 24 hours ahead of `now`, while this library allows a bare date
-up to 14 hours ahead (tied to the real UTC+14 time-zone limit) but gives an
-explicit-offset timestamp no slack at all. Both are defensible, but a caller
-using both kits should not assume they draw the future-date line in the same
-place.
+Both kits give a bare date up to 14 hours of future tolerance (UTC+14 is the
+furthest-ahead civil time zone) and a timestamp none, so the same date or
+timestamp lands on the same side of the future-date line in both. They differ
+in what happens past it: this library throws a `RangeError` for a future or
+malformed date, while `claims-registry-kit` reports the claim as `'stale'`
+instead of throwing. `claims-registry-kit` also accepts a looser date grammar
+(a space instead of `T`, lowercase `t`/`z`, a timestamp without seconds). This
+comparison was checked against `claims-registry-kit` 0.3.0.
 
-## Limits
-
-- The library calculates age from the `reviewedOn` value supplied by the caller. It cannot verify the underlying facts.
-- A recent date is only as trustworthy as the review process that recorded it. Bumping the date without checking the information can make stale content look fresh.
-- It does not store data, run scheduled reviews, send notifications, or check sources.
-- An unparsable date is treated as zero days old by the current implementation. Validate dates at your input boundary if malformed values are possible.
-- It supports two thresholds and the `fresh` → `aging` → `stale` progression. Use `ageInDays` directly if your policy needs different tiers.
+## Layout
 
 ```
 src/
   types.ts       FreshnessLevel, FreshnessConfig, FreshnessResult,
                   FreshnessMessages, FreshnessRecord, DatasetFreshnessResult
-  freshness.ts    ageInDays, assessFreshness
+  freshness.ts    ageInDays, assessFreshness, and the internal snapshot/parse helpers
   dataset.ts      checkDatasetFreshness
   badge.ts        freshnessBadgeText
   index.ts        Barrel export
@@ -338,4 +392,8 @@ test/
   invalid-input.test.ts Invalid inputs, offsets, calendars and gate safety
   future-dates.test.ts  The bare-date "today somewhere on Earth" allowance
   wrong-types.test.ts   Wrong runtime types at every entry point
+  sparse-datasets.test.ts   Holes and non-record slots in records
+  single-read.test.ts   Config, clock, messages and records read once
+  callbacks.test.ts     Message function and messages-argument contract
+  messages-and-boundaries.test.ts  Error wording, format anchors, calendar edges
 ```

@@ -5,7 +5,7 @@ Mapped on **2026-09-26** from connected GitHub, Vercel, and Supabase metadata. T
 ## Identity and repository settings
 
 - Repository: [lkopietz3-byte/freshness-kit](https://github.com/lkopietz3-byte/freshness-kit)
-- Purpose: A library that turns the age of reviewed data into reader-facing fresh, aging, or stale signals.
+- Purpose: A library that turns the age of reviewed data into reader-facing fresh, aging, or stale signals. It measures time since a review date the caller supplies; it does not verify that the data is still true (see the README's "Honest limits").
 - GitHub visibility: **public**; default branch: **`main`**; archived: **no**.
 - Product stage, owner, production health, and GitHub protection/settings beyond the fields above: **not verified**.
 

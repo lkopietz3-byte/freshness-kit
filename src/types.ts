@@ -45,7 +45,11 @@ export interface FreshnessResult {
   message: string
 }
 
-/** A function that turns an age and a reviewed-on date into reader copy for one level. */
+/**
+ * A function that turns an age and a reviewed-on date into reader copy for one
+ * level. It must return a string (empty is fine); anything else makes the
+ * calling assessment throw TypeError.
+ */
 export type FreshnessMessageFn = (ageDays: number, reviewedOn: string) => string
 
 /**
@@ -53,10 +57,19 @@ export type FreshnessMessageFn = (ageDays: number, reviewedOn: string) => string
  * level left out falls back to this library's generic default for that
  * level — callers only need to override the levels whose copy they actually
  * want to change.
+ *
+ * Must be a plain object (or null-prototype object); a Map, class instance or
+ * `null` is rejected with RangeError. Only own properties are used, and an
+ * entry that is present must be a function (`undefined` means "use the
+ * default"), otherwise TypeError.
  */
 export type FreshnessMessages = Partial<Record<FreshnessLevel, FreshnessMessageFn>>
 
-/** One record in a dataset: whatever identifies it, plus its own reviewed-on date. */
+/**
+ * One record in a dataset: whatever identifies it, plus its own reviewed-on
+ * date. Extra own enumerable fields are copied through to the evaluated record.
+ * The library does not check that `id` is present or unique.
+ */
 export interface FreshnessRecord {
   id: string
   reviewedOn: string

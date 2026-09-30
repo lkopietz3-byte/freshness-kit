@@ -15,8 +15,16 @@ is `src/index.ts`; the package export resolves to generated `dist/index.js`.
   without re-deriving the 14-hour constant from the IANA database.
 - Every entry point rejects the wrong runtime type instead of coercing or
   crashing: non-string `reviewedOn`, non-object `config`, non-`Date` `now`,
-  non-array `records`, and non-object dataset entries all throw `RangeError`,
-  never `TypeError` and never a silent accept (see test/wrong-types.test.ts).
+  non-array `records`, non-plain `messages` and non-object dataset entries all
+  throw `RangeError`, never a silent accept (see test/wrong-types.test.ts). The
+  one `TypeError` is for the caller's own code: a `messages` entry that is not a
+  function, or a message function that returns a non-string.
+- Inputs are read once. `records` is walked in one indexed pass that rejects
+  holes and non-objects (`.map` would skip a hole and `for...of` would visit
+  it), each entry is copied, and `config`, `messages` and `now` are snapshotted.
+  What is validated is what is assessed and returned; no message callback runs
+  until every record has passed (test/sparse-datasets.test.ts,
+  test/single-read.test.ts).
 - `assessFreshness` validates thresholds before classifying. Valid results
   retain fresh/aging/stale and inclusive boundary behavior.
 - `checkDatasetFreshness` aborts if any record is invalid. An empty dataset
@@ -39,16 +47,19 @@ node --input-type=module -e 'import {assessFreshness} from "./dist/index.js"; co
 ```
 
 Tests cover actual date classification and rejection paths, offsets,
-calendar rollover, clocks, thresholds, dataset propagation, messages and
-badges. The invalid-input regression must fail on the original source.
+calendar rollover, clocks, thresholds, dataset propagation, sparse arrays,
+single-read snapshots, message callbacks and badges. Mutation score is measured
+locally with Stryker (not a dependency of this repo): install
+`@stryker-mutator/core` and `@stryker-mutator/vitest-runner` with `--no-save`.
+Each invalid-input regression must fail on the source it fixes.
 
 ## Are the types wrong? (attw)
 
 CI runs [`arethetypeswrong`](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
 (`npm run attw`, which is `attw --pack . --ignore-rules cjs-resolves-to-esm`)
 against the packed tarball after the build step. The `cjs-resolves-to-esm` rule is ignored on
-purpose: this is an ESM-only package (`"type": "module"`, no `require` entry point), so a
-CommonJS consumer must use Node's `require(esm)` support (Node >=20.19 or >=22.12 — see
+purpose: this is an ESM-only package (`"type": "module"`; the `default` export condition points at
+the same ESM file), so a CommonJS consumer must use Node's `require(esm)` support (Node >=20.19 or >=22.12 — see
 "Runtime support policy" below) rather than a native `require`. A dual CJS+ESM build was
 rejected to avoid the dual-package hazard (two separately-identified copies of the same module,
 with broken `instanceof` checks and duplicated module state across the CJS and ESM entry
@@ -58,7 +69,8 @@ points).
 
 `npm run verify` (lint, typecheck, test, build, verify:package) runs automatically before
 publish via the `prepublishOnly` script, so a broken build cannot reach the registry by
-accident. To release: add a dated entry to `CHANGELOG.md`, bump `version` in
+accident. The package is on npm (`npm view freshness-kit` lists the published
+versions); a released version cannot be edited, only superseded. To release: add a dated entry to `CHANGELOG.md`, bump `version` in
 `package.json`, commit, and push a `vX.Y.Z` tag that matches the new version, then let
 `.github/workflows/release.yml` install, verify, and publish it. (You can also run
 `npm publish` locally; `prepublishOnly` still guards it.)
@@ -78,7 +90,7 @@ with it.
 ### Runtime support policy
 
 - **Supported (recommended for production):** Node 22 and 24 LTS; Node 26 current.
-- **Compatibility-tested:** Node 20. Node 20 is end-of-life — nodejs.org's release page
+- **Compatibility-tested:** Node 20 (CI pins 20.19.0 and 22.12.0, the `require(esm)` floors, as well as the latest 20, 22 and 24). Node 20 is end-of-life — nodejs.org's release page
   (<https://nodejs.org/en/about/previous-releases>) lists it as `EOL`, with its final release
   dated Mar 24, 2026. The `compat` job in `verify.yml` still runs on Node 20 to catch
   regressions, but that runtime gets no security fixes upstream; don't run production traffic
@@ -93,9 +105,10 @@ with it.
 `workflow_dispatch` or a pushed `v*` tag, requests a short-lived OIDC token instead of
 reading a stored npm token (`permissions: id-token: write`), and runs a plain `npm publish`
 with no token and no `--provenance` flag, because provenance attestation is generated
-automatically under trusted publishing. Before publishing, the workflow confirms the tag
-matches `package.json`'s `version` and checks whether that version is already on the
-registry, so re-running it on a version that's already published is a no-op rather than an
-error. Trusted publishing must be configured for this package on npmjs.com (linking it to this
+automatically under trusted publishing. Before publishing, the workflow fails unless it is running on a `v*` tag ref (a manual
+run from a branch is refused) whose version matches `package.json`, runs `audit:dependencies`,
+`verify` and `attw`, and checks whether that version is already on the registry: only a
+confirmed `E404` counts as "not published", any other registry error fails the job, and a
+version that is already published is a no-op rather than an error. Trusted publishing must be configured for this package on npmjs.com (linking it to this
 GitHub repository and the `release.yml` workflow) before the first automated release will
 work.
