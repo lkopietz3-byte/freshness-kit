@@ -53,12 +53,31 @@ assert.equal(dataset.level, 'stale');
 assert.equal(dataset.oldest?.id, 'b');
 assert.deepEqual(dataset.records.map((r) => r.result.level), ['fresh', 'stale']);
 
+// A sparse records array is rejected, never assessed as fresh (FK-001): the
+// single-hole array and the trailing-hole array from the audit reproduction.
+assert.throws(() => checkDatasetFreshness(new Array(1), CONFIG, undefined, NOW), RangeError);
+const trailingHole = new Array(2);
+trailingHole[0] = { id: 'a', reviewedOn: '2026-06-01' };
+assert.throws(() => checkDatasetFreshness(trailingHole, CONFIG, undefined, NOW), RangeError);
+
+// A message callback that returns a non-string is a TypeError, not a
+// non-string result.message.
+assert.throws(
+  () => assessFreshness('2026-06-01', CONFIG, { stale: () => undefined }, NOW),
+  TypeError,
+);
+
 const emptyDataset = checkDatasetFreshness([], CONFIG, undefined, NOW);
 assert.equal(emptyDataset.level, 'fresh');
 assert.equal(emptyDataset.oldest, undefined);
 
-// freshnessBadgeText: short text derived from a real result.
+// freshnessBadgeText: short text derived from a real result. The wording says
+// "reviewed", because the input is a review date.
 assert.equal(freshnessBadgeText(fresh), '');
-assert.equal(freshnessBadgeText(stale), 'Stale — last updated 62d ago');
+assert.equal(
+  freshnessBadgeText(assessFreshness('2026-07-13', CONFIG, undefined, NOW)),
+  'Reviewed 20d ago',
+);
+assert.equal(freshnessBadgeText(stale), 'Stale — last reviewed 62d ago');
 
 console.log('freshness-kit consumer probe: all assertions passed');

@@ -38,7 +38,7 @@ assertEqual(level, 'stale', 'assessFreshness level');
 assertEqual(result.message, 'CUSTOM 62 2026-06-01', 'assessFreshness message override');
 
 const badge: string = freshnessBadgeText(result);
-assertEqual(badge, 'Stale — last updated 62d ago', 'freshnessBadgeText');
+assertEqual(badge, 'Stale — last reviewed 62d ago', 'freshnessBadgeText');
 
 const records: FreshnessRecord[] = [
   { id: 'a', reviewedOn: '2026-07-30' },
