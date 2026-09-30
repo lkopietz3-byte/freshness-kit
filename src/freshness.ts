@@ -60,10 +60,11 @@ function readNow(now: Date): number {
   } catch (cause) {
     throw new RangeError('Freshness now must be a valid Date.', { cause })
   }
-  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+  // Number.isFinite does not coerce, so a non-number (a string, undefined) fails it too.
+  if (!Number.isFinite(timestamp)) {
     throw new RangeError('Freshness now must be a valid Date.')
   }
-  return timestamp
+  return timestamp as number
 }
 
 function parseReviewedOn(reviewedOn: string): { instant: number; dateOnly: boolean } {
