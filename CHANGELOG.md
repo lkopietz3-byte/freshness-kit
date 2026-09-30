@@ -22,7 +22,9 @@ wording is different. The exports and result shapes are unchanged.
   inherited `Array.prototype` entry cannot fill a hole. `[]` still returns
   `level: 'fresh'` with `oldest: undefined`.
 - **Inputs are read once.** `config`, `messages` and `now` are read once per
-  call and each dataset entry is copied once, so a getter, a Proxy, a Date
+  call and each dataset entry is copied once (own enumerable fields, plus `id`
+  and `reviewedOn` read explicitly, so class getters and inherited fields keep
+  working and come back as plain fields), so a getter, a Proxy, a Date
   subclass or a message callback that changes the caller's objects cannot make
   the result differ from what was validated. Every record is classified before
   any message callback runs, so a rejected dataset runs no callbacks. A

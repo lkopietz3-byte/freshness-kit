@@ -218,9 +218,11 @@ were found, and is not proof that required data exists.
 
 Inputs are read once. `checkDatasetFreshness` walks every slot of `records`
 in one indexed pass and copies each entry (own enumerable properties, so extra
-fields on a record survive), and `config`, `messages` and `now` are each read
-once per call. What gets validated is exactly what gets assessed and returned:
-a getter, a Proxy or a message callback that changes the caller's objects
+fields on a record survive, plus `id` and `reviewedOn`, each read once with a
+normal property read, so a class getter or an inherited field works and ends up
+as a plain field on the returned record), and `config`, `messages` and `now` are
+each read once per call. What gets validated is exactly what gets assessed and
+returned: a getter, a Proxy or a message callback that changes the caller's objects
 afterward cannot change the result. No message callback runs until every record
 has been checked, so a rejected dataset produces no callbacks.
 
