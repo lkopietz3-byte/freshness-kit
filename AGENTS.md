@@ -25,7 +25,7 @@ Make staleness self-announcing: compute a fresh/aging/stale level from a reviewe
 
 ## Review preparation
 
-See [docs/REVIEW_READINESS.md](docs/REVIEW_READINESS.md) for milestone review cadence, declared verification gates and the next launch-preparation task.
+See [docs/REVIEW_READINESS.md](docs/REVIEW_READINESS.md) for review cadence, declared verification gates and the next consumer integration task.
 
 ## Code Review Rules
 
