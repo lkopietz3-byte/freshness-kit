@@ -1,5 +1,7 @@
 # Freshness Kit
 
+**[Try it in your browser →](https://lkopietz3-byte.github.io/honesty-kits/#freshness-kit)** · Part of [honesty kits](https://github.com/lkopietz3-byte/honesty-kits), a family of small checks for the claims an AI product makes.
+
 A small TypeScript library that converts a caller-supplied review date and age thresholds into `fresh`, `aging`, or `stale` indicators. It helps a product show how long ago information was reviewed; it does not determine whether that information is still true.
 
 ## Start here
