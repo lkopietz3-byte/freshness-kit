@@ -1,6 +1,6 @@
 {
   "name": "freshness-kit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Make staleness self-announcing: compute a fresh/aging/stale level from a reviewed-on date against two declared thresholds, with three-state reader-facing degradation (silent, quiet note, prominent warning) instead of a page that just keeps showing old data with a straight face. Zero-dependency, framework-agnostic TypeScript.",
   "keywords": [
     "data-freshness",
@@ -10,7 +10,8 @@
     "data-quality",
     "honesty",
     "ci",
-    "dbt"
+    "dbt",
+    "honesty-kits"
   ],
   "author": "Lucas Kopietz",
   "license": "MIT",
@@ -18,7 +19,7 @@
     "type": "git",
     "url": "git+https://github.com/lkopietz3-byte/freshness-kit.git"
   },
-  "homepage": "https://github.com/lkopietz3-byte/freshness-kit#readme",
+  "homepage": "https://lkopietz3-byte.github.io/honesty-kits/#freshness-kit",
   "bugs": {
     "url": "https://github.com/lkopietz3-byte/freshness-kit/issues"
   },
