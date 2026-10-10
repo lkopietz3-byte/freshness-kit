@@ -103,3 +103,99 @@ export interface DatasetFreshnessResult {
   /** Every input record, each with its own computed result, in input order. */
   records: EvaluatedFreshnessRecord[]
 }
+
+// ---------------------------------------------------------------------------
+// Request-time facts (assessFact). See README "Request-time facts".
+// ---------------------------------------------------------------------------
+
+/**
+ * The verdict for one dated fact.
+ *
+ * fresh, aging, stale: the three age levels of `FreshnessLevel`.
+ * expired: the fact's own `expiresAt` has been reached. Always withheld.
+ * invalid: the fact's data cannot be trusted (blank source, unreadable or
+ *          future date, no policy). Always withheld.
+ */
+export type FactLevel = FreshnessLevel | 'expired' | 'invalid'
+
+/**
+ * What a caller should do with the fact right now.
+ *
+ * show: render it as is.
+ * caveat: render it with a visible "last checked" note.
+ * withhold: do not render it; show nothing or a "no current data" state.
+ */
+export type FactDisplay = 'show' | 'caveat' | 'withhold'
+
+/**
+ * `FreshnessConfig` plus one switch: what a 'stale' fact does. The default is
+ * 'caveat' (stale facts are still shown, with a caveat). Set 'withhold' for
+ * facts where a stale value is worse than no value, such as a price.
+ */
+export interface FactPolicy extends FreshnessConfig {
+  staleDisplay?: 'caveat' | 'withhold'
+}
+
+/**
+ * One fact with its own check date, source and optional deadline.
+ *
+ * `checkedAt` and `expiresAt` use the kit's date grammar: `YYYY-MM-DD` (UTC
+ * midnight) or an ISO timestamp with seconds and an explicit timezone.
+ * Everything in the data (`checkedAt`, `expiresAt`, `source`) may be any
+ * runtime value: a bad value gives an 'invalid' assessment, never a throw.
+ * `policy` and `boundary` are configuration: a wrong type throws TypeError.
+ */
+export interface DatedFact {
+  id: string
+  checkedAt: string
+  /** Where the fact came from. Missing or blank makes the fact 'invalid'. */
+  source: string
+  /** Deadline. At or after it (see `boundary`) the fact is 'expired'. */
+  expiresAt?: string
+  /** This fact's thresholds. Replaces the `defaults` thresholds for this fact. */
+  policy?: FactPolicy
+  /**
+   * Whether exactly `expiresAt` counts as expired. 'inclusive' (the default):
+   * the fact is withheld AT the instant. 'exclusive': it is still shown AT
+   * the instant and withheld from the next millisecond.
+   */
+  boundary?: 'inclusive' | 'exclusive'
+}
+
+/** The verdict for one fact. */
+export interface FactAssessment {
+  /** The fact's id, echoed ('' when the id was not a string). */
+  id: string
+  level: FactLevel
+  display: FactDisplay
+  /** Whole days since `checkedAt`. `null` when the fact is 'invalid'. */
+  ageDays: number | null
+  /** A plain-language explanation for logs and admin screens. */
+  reason: string
+  /** A short reader-facing string such as "Checked 3 days ago". */
+  label: string
+}
+
+/**
+ * A function that turns an age and a check date into a label for one level.
+ * `ageDays` is `null` for 'invalid'. `checkedAt` is '' when the fact had no
+ * string date. It must return a string, otherwise the assessment throws
+ * TypeError.
+ */
+export type FactLabelFn = (ageDays: number | null, checkedAt: string) => string
+
+/** Caller-supplied label overrides, one per level. Unlisted levels use the defaults. */
+export type FactLabels = Partial<Record<FactLevel, FactLabelFn>>
+
+/** The roll-up of `assessFacts`. */
+export interface FactsAssessment {
+  /** Every input fact's assessment, in input order. */
+  results: FactAssessment[]
+  /**
+   * The least trustworthy result (invalid, then expired, stale, aging, fresh);
+   * the first one in input order on a tie. `null` for an empty list.
+   */
+  worst: FactAssessment | null
+  /** How many results landed on each level. Every level is present. */
+  counts: Record<FactLevel, number>
+}

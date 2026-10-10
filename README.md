@@ -186,6 +186,123 @@ sparse array: a hole such as `new Array(1)` or `[a, , b]` throws
 skipped. The empty array `[]` is the one dataset with nothing to check: it
 returns `level: 'fresh'` and `oldest: undefined`.
 
+## Request-time facts (assessFact)
+
+`assessFreshness` answers "how old is this?" and throws on bad input, which
+is right for a build or a CI gate. A request handler has a different
+question: "may I show this fact right now?" It cannot afford to crash on one
+bad row, and it must never show a fact it cannot vouch for. `assessFact` is
+that answer: one fact in, one verdict out, and it never throws because of
+bad data.
+
+Each fact carries its own check date, source and optional deadline, and may
+carry its own thresholds:
+
+```ts
+import { assessFact, assessFacts, type DatedFact, type FactPolicy } from "freshness-kit";
+
+const now = new Date("2026-10-10T12:00:00Z"); // pinned for a reproducible example
+const defaults: FactPolicy = { warnAfterDays: 14, staleAfterDays: 45 };
+
+const hours: DatedFact = {
+  id: "hours",
+  checkedAt: "2026-10-07",
+  source: "https://example.com/hours",
+};
+assessFact(hours, now, defaults);
+// { id: 'hours', level: 'fresh', display: 'show', ageDays: 3,
+//   reason: 'Checked 3 days ago, within 14 days.', label: 'Checked 3 days ago' }
+
+const promo: DatedFact = {
+  id: "promo",
+  checkedAt: "2026-10-01",
+  source: "https://example.com/promo",
+  expiresAt: "2026-10-10T12:00:00Z", // at this instant the promo is withheld
+};
+assessFact(promo, now, defaults);
+// { id: 'promo', level: 'expired', display: 'withhold', ageDays: 9,
+//   reason: 'Expired: now is at or after expiresAt 2026-10-10T12:00:00Z.', label: 'Expired' }
+
+const price: DatedFact = {
+  id: "price",
+  checkedAt: "2026-08-01",
+  source: "https://example.com/price",
+  policy: { warnAfterDays: 7, staleAfterDays: 30, staleDisplay: "withhold" },
+};
+assessFact(price, now, defaults).display; // 'withhold' (a stale price is worse than none)
+
+assessFact({ id: "bad", checkedAt: "soon", source: "" }, now, defaults);
+// level 'invalid', display 'withhold', ageDays null, label 'Source unknown'
+
+const { results, worst, counts } = assessFacts([hours, promo, price], now, defaults);
+// counts: { fresh: 1, aging: 0, stale: 1, expired: 1, invalid: 0 }; worst is the 'expired' promo
+```
+
+Rules, in the order they are applied (first match wins):
+
+1. **Bad data is `invalid` and withheld.** A missing or blank `source`, a
+   `checkedAt` or `expiresAt` that is not a real date in the kit's grammar
+   (`YYYY-MM-DD`, or an ISO timestamp with seconds and an explicit timezone),
+   an `expiresAt` of `null`, or a `checkedAt` in the future beyond the kit's
+   grace (14 hours for a bare date, none for a timestamp) all give level
+   `invalid`, display `withhold`, `ageDays: null` and a plain `reason`. It
+   fails closed: at request time the safe answer is to withhold.
+2. **A reached `expiresAt` is `expired` and withheld.** `boundary` decides
+   whether exactly-at counts. The default, `'inclusive'`, withholds AT the
+   instant (show only while `now < expiresAt`). `'exclusive'` still shows AT
+   the instant and withholds from the next millisecond (`now <= expiresAt`).
+   A bare-date `expiresAt` means UTC midnight at the start of that date, so
+   `2026-10-10` withholds from 2026-10-10T00:00:00Z. Use one rule everywhere
+   and you never compare `<` in one place and `<=` in another.
+3. **No thresholds is `invalid`.** The kit has no built-in thresholds. Pass
+   `defaults`, or give the fact a `policy`; otherwise a fact that has not
+   expired cannot be aged and is withheld.
+4. **Otherwise the age decides**, with the kit's usual inclusive thresholds on
+   floored whole days:
+
+| Level | When | Display |
+| --- | --- | --- |
+| `fresh` | age up to and including `warnAfterDays` | `show` |
+| `aging` | past `warnAfterDays`, up to and including `staleAfterDays` | `caveat` |
+| `stale` | past `staleAfterDays` | `caveat`, or `withhold` when `staleDisplay` is `'withhold'` |
+| `expired` | `expiresAt` reached | `withhold` |
+| `invalid` | bad data, or no thresholds | `withhold` |
+
+A fact's `policy` replaces the `defaults` thresholds for that fact.
+`staleDisplay` falls back field by field: the fact's policy, then `defaults`,
+then `'caveat'`. Only `stale` is affected; `aging` always caveats.
+
+**Labels.** `label` is a short reader-facing string: `Checked today`,
+`Checked 1 day ago`, `Checked 3 days ago`, `Expired`, `Date unknown`,
+`Source unknown` or `Unverified` (no thresholds). `reason` is the longer
+explanation for logs and admin screens. To change the wording, pass a fourth
+argument shaped like the kit's `messages`: a plain object with a function per
+level, called as `(ageDays, checkedAt)`, where `ageDays` is `null` for
+`invalid`:
+
+```ts
+assessFact(hours, now, defaults, {
+  fresh: (ageDays) => `Verified ${ageDays}d ago`,
+  expired: () => "No longer offered",
+});
+```
+
+**Errors.** Bad data never throws. Programmer mistakes do: `now` that is not
+a valid Date, `facts` that is not an array (or has holes), a fact that is not
+an object, a `policy`, `defaults`, `staleDisplay`, `boundary` or `labels` of
+the wrong type, or a label function that returns a non-string, all throw
+`TypeError`. Thresholds that are numbers but out of range (negative,
+fractional, or `warnAfterDays` above `staleAfterDays`) throw the same
+`RangeError` as `assessFreshness`. A fact whose fields cannot be read (a
+getter that throws, a revoked proxy) is `invalid`, not a crash.
+
+`assessFacts(facts, now, defaults?, labels?)` runs `assessFact` over a list
+with one clock read and returns `{ results, worst, counts }`. `results` keeps
+input order. `worst` is the least trustworthy result, ranked `invalid`,
+`expired`, `stale`, `aging`, `fresh` (the first on a tie), or `null` for an
+empty list. `counts` has all five levels. Like the rest of the kit, this
+measures time since a caller-supplied date; it cannot tell you the fact is true.
+
 ## Input contract and migration
 
 `ageInDays`, `assessFreshness`, and `checkDatasetFreshness` reject invalid,
@@ -286,6 +403,12 @@ context and the TSDoc on each symbol for the full contract.
   the result up to the single worst level, still returning every per-record
   result. Throws on an invalid record or a hole in `records`; never returns a
   partial result. `[]` returns `level: 'fresh'` with `oldest: undefined`.
+- **`assessFact(fact: DatedFact, now: Date, defaults?: FactPolicy, labels?: FactLabels): FactAssessment`**
+  Request-time verdict for one fact: `level` (`fresh | aging | stale | expired | invalid`),
+  `display` (`show | caveat | withhold`), `ageDays` (`null` when invalid), `reason`
+  and `label`. Never throws on bad data; fails closed. See "Request-time facts".
+- **`assessFacts(facts: readonly DatedFact[], now: Date, defaults?: FactPolicy, labels?: FactLabels): FactsAssessment`**
+  `assessFact` over a list: `{ results, worst, counts }`.
 - **`freshnessBadgeText(result: FreshnessResult): string`**
   Turns a `FreshnessResult` into a short plain-text badge: `''` when fresh,
   `Reviewed 20d ago` when aging, `Stale — last reviewed 62d ago` when stale.
@@ -296,7 +419,9 @@ context and the TSDoc on each symbol for the full contract.
   (`(ageDays, reviewedOn) => string`, must return a string), `FreshnessMessages` (a `Partial` map
   of `FreshnessMessageFn` by level), `FreshnessRecord` (`{ id, reviewedOn }`),
   `EvaluatedFreshnessRecord` (a `FreshnessRecord` plus its `result`), and
-  `DatasetFreshnessResult` (`{ level, oldest, records }`).
+  `DatasetFreshnessResult` (`{ level, oldest, records }`). For `assessFact`:
+  `FactLevel`, `FactDisplay`, `FactPolicy` (a `FreshnessConfig` plus `staleDisplay`),
+  `DatedFact`, `FactAssessment`, `FactLabelFn`, `FactLabels` and `FactsAssessment`.
 
 ## Render a short label
 
@@ -357,8 +482,11 @@ The same assessment can be used when rendering a page. Choose thresholds that fi
   step, a page render, a scheduled task in whatever system you already
   use) and your own place to store `reviewedOn` dates.
 - **Invalid input stops the assessment; the host owns the visible error.**
-  This library throws rather than inventing an age or returning a fourth
+  `assessFreshness` throws rather than inventing an age or returning a fourth
   freshness level that an existing `level === 'stale'` gate could miss.
+  `assessFact` is the separate request-time API: it has its own `FactLevel`
+  and returns `invalid` with `display: 'withhold'` for bad data, so gate on
+  `display`, never on `level === 'stale'`.
   Follow the input contract above when adapting existing callers. It does
   not validate that the records array contains every required record, and it
   does not check that record ids are present or unique.
@@ -404,6 +532,7 @@ src/
   types.ts       FreshnessLevel, FreshnessConfig, FreshnessResult,
                   FreshnessMessages, FreshnessRecord, DatasetFreshnessResult
   freshness.ts    ageInDays, assessFreshness, and the internal snapshot/parse helpers
+  assess-fact.ts  assessFact, assessFacts (request-time, fail-closed)
   dataset.ts      checkDatasetFreshness
   badge.ts        freshnessBadgeText
   index.ts        Barrel export
@@ -416,4 +545,5 @@ test/
   single-read.test.ts   Config, clock, messages and records read once
   callbacks.test.ts     Message function and messages-argument contract
   messages-and-boundaries.test.ts  Error wording, format anchors, calendar edges
+  assess-fact.test.ts   assessFact verdict table, property test, time-zone child processes
 ```

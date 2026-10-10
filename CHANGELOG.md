@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `assessFact(fact, now, defaults?, labels?)` and `assessFacts(facts, now, defaults?, labels?)`:
+  a request-time verdict per fact. Each `DatedFact` carries its own `checkedAt`,
+  `source`, optional `expiresAt`, optional `policy` and optional `boundary`. The
+  result has `level` (`fresh | aging | stale | expired | invalid`), `display`
+  (`show | caveat | withhold`), `ageDays`, `reason` and `label`.
+  - Bad data never throws. A missing or blank source, an unparseable
+    `checkedAt` or `expiresAt`, a `checkedAt` beyond the future grace, or no
+    thresholds at all gives `invalid` and `withhold` (fail closed).
+  - `expiresAt` reached gives `expired` and `withhold`. `boundary` is
+    `'inclusive'` by default (withhold AT the instant) or `'exclusive'`.
+  - `fresh` shows, `aging` and `stale` caveat, `expired` and `invalid` withhold.
+    A policy can set `staleDisplay: 'withhold'`.
+  - Optional per-level label functions reuse the shape of `messages`.
+  - Programmer errors (a bad `now`, `facts`, policy or labels) throw `TypeError`.
+  - `assessFacts` adds `results`, `worst` and `counts`.
+  - New types: `DatedFact`, `FactAssessment`, `FactsAssessment`, `FactLevel`,
+    `FactDisplay`, `FactPolicy`, `FactLabelFn`, `FactLabels`.
+  - Existing exports and behavior are unchanged.
+
 ### Fixed
 
 - The default aging and stale messages say "1 day ago" instead of "1 days ago".

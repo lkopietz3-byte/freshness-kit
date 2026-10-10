@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import {
   ageInDays,
+  assessFact,
+  assessFacts,
   assessFreshness,
   checkDatasetFreshness,
   freshnessBadgeText,
@@ -79,5 +81,37 @@ assert.equal(
   'Reviewed 20d ago',
 );
 assert.equal(freshnessBadgeText(stale), 'Stale — last reviewed 62d ago');
+
+// assessFact: request-time verdicts that never throw on bad data.
+const fact = { id: 'hours', checkedAt: '2026-07-30', source: 'https://example.com/hours' };
+const shown = assessFact(fact, NOW, CONFIG);
+assert.deepEqual(
+  { level: shown.level, display: shown.display, ageDays: shown.ageDays, label: shown.label },
+  { level: 'fresh', display: 'show', ageDays: 3, label: 'Checked 3 days ago' },
+);
+const expiredFact = assessFact({ ...fact, id: 'promo', expiresAt: '2026-08-02T12:00:00Z' }, NOW, CONFIG);
+assert.equal(expiredFact.level, 'expired'); // inclusive by default: withheld AT the instant
+assert.equal(expiredFact.display, 'withhold');
+assert.equal(
+  assessFact({ ...fact, expiresAt: '2026-08-02T12:00:00Z', boundary: 'exclusive' }, NOW, CONFIG).display,
+  'show',
+);
+const badFact = assessFact({ id: 'bad', checkedAt: 'soon', source: '' }, NOW, CONFIG);
+assert.equal(badFact.level, 'invalid');
+assert.equal(badFact.display, 'withhold');
+assert.equal(badFact.ageDays, null);
+assert.equal(
+  assessFact({ ...fact, checkedAt: '2026-06-01', policy: { ...CONFIG, staleDisplay: 'withhold' } }, NOW).display,
+  'withhold',
+);
+assert.throws(() => assessFact(fact, 'not a date', CONFIG), TypeError); // programmer error
+const rollup = assessFacts(
+  [fact, { ...fact, id: 'promo', expiresAt: '2026-08-01' }, { id: 'bad', checkedAt: 'x', source: 's' }],
+  NOW,
+  CONFIG,
+);
+assert.deepEqual(rollup.counts, { fresh: 1, aging: 0, stale: 0, expired: 1, invalid: 1 });
+assert.equal(rollup.worst?.id, 'bad');
+assert.equal(assessFacts([], NOW, CONFIG).worst, null);
 
 console.log('freshness-kit consumer probe: all assertions passed');
