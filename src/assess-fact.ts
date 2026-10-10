@@ -31,6 +31,9 @@ interface ReadPolicy {
   staleDisplay: 'caveat' | 'withhold' | undefined
 }
 
+/** Validated policies by object identity, for one public call. */
+type PolicyCache = Map<object, ReadPolicy>
+
 type FactLabelFns = Partial<Record<FactLevel, FactLabelFn>>
 
 /** The label shown for each kind of invalid fact. */
@@ -50,11 +53,26 @@ function readClock(now: Date): number {
  * must be an object with the two thresholds as numbers: a wrong type is a
  * TypeError, an out-of-range number is the kit's usual RangeError.
  */
-function readPolicy(value: FactPolicy | undefined, where: string): ReadPolicy | undefined {
+function readPolicy(
+  value: FactPolicy | undefined,
+  where: string,
+  cache: PolicyCache,
+): ReadPolicy | undefined {
   if (value === undefined) return undefined
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError(`${where} must be an object with warnAfterDays and staleAfterDays, or undefined (received ${typeName(value)}).`)
   }
+  // One snapshot per policy object per call: a policy shared by many facts, or
+  // passed as both `defaults` and a fact policy, is read and validated once, so
+  // a stateful getter cannot give identical facts different verdicts.
+  const cached = cache.get(value)
+  if (cached !== undefined) return cached
+  const read = readPolicyFields(value, where)
+  cache.set(value, read)
+  return read
+}
+
+function readPolicyFields(value: FactPolicy, where: string): ReadPolicy {
   const warnAfterDays: unknown = value.warnAfterDays
   const staleAfterDays: unknown = value.staleAfterDays
   const staleDisplay: unknown = value.staleDisplay
@@ -120,10 +138,14 @@ function snapshot(fact: DatedFact): FactSnapshot {
     return UNREADABLE
   }
   if (isArray) throw new TypeError('assessFact: a fact must be an object (received array).')
+  // Fields are read in order, once each. If a later read throws, the id read
+  // before the failure is kept so the result still identifies the fact.
+  let id: unknown = ''
   try {
+    id = fact.id
     return {
       readable: true,
-      id: fact.id,
+      id,
       checkedAt: fact.checkedAt,
       source: fact.source,
       expiresAt: fact.expiresAt,
@@ -132,7 +154,7 @@ function snapshot(fact: DatedFact): FactSnapshot {
     }
   } catch {
     // A throwing getter or revoked proxy is damaged data, not a reason to crash a request.
-    return UNREADABLE
+    return { ...UNREADABLE, id }
   }
 }
 
@@ -193,6 +215,7 @@ function assessOne(
   fact: DatedFact,
   current: number,
   defaults: ReadPolicy | undefined,
+  cache: PolicyCache,
 ): Pending {
   const snap = snapshot(fact)
   const id = typeof snap.id === 'string' ? snap.id : ''
@@ -202,7 +225,7 @@ function assessOne(
 
   // Configuration first: a wrong type here is a programmer error and throws,
   // whatever the data looks like.
-  const policy = snap.readable ? readPolicy(snap.policy as FactPolicy | undefined, 'fact.policy') : undefined
+  const policy = snap.readable ? readPolicy(snap.policy as FactPolicy | undefined, 'fact.policy', cache) : undefined
   const boundary: unknown = snap.boundary
   if (boundary !== undefined && boundary !== 'inclusive' && boundary !== 'exclusive') {
     throw new TypeError(`fact.boundary must be 'inclusive', 'exclusive' or undefined (received ${typeName(boundary)}).`)
@@ -312,9 +335,10 @@ export function assessFact(
   labels?: FactLabels,
 ): FactAssessment {
   const current = readClock(now)
-  const readDefaults = readPolicy(defaults, 'defaults')
+  const cache: PolicyCache = new Map()
+  const readDefaults = readPolicy(defaults, 'defaults', cache)
   const fns = readLabels(labels)
-  return render(assessOne(fact, current, readDefaults), fns)
+  return render(assessOne(fact, current, readDefaults, cache), fns)
 }
 
 /**
@@ -332,7 +356,8 @@ export function assessFacts(
   if (!Array.isArray(facts)) {
     throw new TypeError(`assessFacts: facts must be an array (received ${typeName(facts)}).`)
   }
-  const readDefaults = readPolicy(defaults, 'defaults')
+  const cache: PolicyCache = new Map()
+  const readDefaults = readPolicy(defaults, 'defaults', cache)
   const fns = readLabels(labels)
   // One indexed pass: `.map` would skip a hole.
   const length = facts.length
@@ -343,7 +368,7 @@ export function assessFacts(
   }
   // Judge every fact before any label callback runs: a callback cannot change a later verdict,
   // and a bad policy on a later fact throws before any callback has run.
-  const pending = list.map((fact) => assessOne(fact, current, readDefaults))
+  const pending = list.map((fact) => assessOne(fact, current, readDefaults, cache))
   const results = pending.map((p) => render(p, fns))
   const counts: Record<FactLevel, number> = { fresh: 0, aging: 0, stale: 0, expired: 0, invalid: 0 }
   let worst: FactAssessment | null = null

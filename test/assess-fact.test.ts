@@ -365,6 +365,50 @@ describe('assessFacts review fixes', () => {
   })
 })
 
+describe('assessFacts getter edge cases', () => {
+  it('a shared policy object is read once per call, so identical facts get identical verdicts', () => {
+    let reads = 0
+    const shared = {
+      warnAfterDays: 14,
+      get staleAfterDays(): number {
+        reads += 1
+        return reads === 1 ? 45 : 5
+      },
+    } as FactPolicy
+    const a = fact({ id: 'a', checkedAt: daysAgo(20), policy: shared })
+    const b = fact({ id: 'b', checkedAt: daysAgo(20), policy: shared })
+    const r = assessFacts([a, b], NOW, shared)
+    expect(reads).toBe(1)
+    expect(r.results.map((x) => x.level)).toEqual(['aging', 'aging'])
+  })
+
+  it('a policy used as both defaults and a fact policy is read once in assessFact', () => {
+    let reads = 0
+    const shared = {
+      warnAfterDays: 14,
+      get staleAfterDays(): number {
+        reads += 1
+        return 45
+      },
+    } as FactPolicy
+    assessFact(fact({ id: 'a', policy: shared }), NOW, shared)
+    expect(reads).toBe(1)
+  })
+
+  it('a fact whose later getter throws keeps the id read before the failure', () => {
+    const broken = {
+      id: 'broken-fact',
+      get checkedAt(): string {
+        throw new Error('boom')
+      },
+      source: 'x',
+    } as unknown as DatedFact
+    const r = assessFacts([fact({ id: 'ok' }), broken], NOW, DEFAULTS)
+    expect(r.results[1]).toMatchObject({ id: 'broken-fact', level: 'invalid', display: 'withhold' })
+    expect(r.worst?.id).toBe('broken-fact')
+  })
+})
+
 describe('assessFact never throws on bad data (property test)', () => {
   // A small deterministic generator so a failure is reproducible.
   function lcg(seed: number): () => number {
