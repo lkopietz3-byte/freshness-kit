@@ -149,6 +149,17 @@ function defaultLabel(level: FactLevel, ageDays: number | null, cause: InvalidCa
   }
 }
 
+/** A verdict before its label is rendered. Holds no caller object, so no callback can change it. */
+interface Pending {
+  id: string
+  level: FactLevel
+  display: FactDisplay
+  ageDays: number | null
+  reason: string
+  checkedAt: string
+  cause: InvalidCause
+}
+
 function build(
   id: string,
   level: FactLevel,
@@ -156,9 +167,14 @@ function build(
   ageDays: number | null,
   reason: string,
   checkedAt: string,
-  fns: FactLabelFns,
   cause: InvalidCause = 'other',
-): FactAssessment {
+): Pending {
+  return { id, level, display, ageDays, reason, checkedAt, cause }
+}
+
+/** Run last, after every fact has been read and judged: label callbacks never see a half-assessed list. */
+function render(pending: Pending, fns: FactLabelFns): FactAssessment {
+  const { id, level, display, ageDays, reason, checkedAt, cause } = pending
   const custom = fns[level]
   let label: string
   if (custom === undefined) {
@@ -177,13 +193,12 @@ function assessOne(
   fact: DatedFact,
   current: number,
   defaults: ReadPolicy | undefined,
-  fns: FactLabelFns,
-): FactAssessment {
+): Pending {
   const snap = snapshot(fact)
   const id = typeof snap.id === 'string' ? snap.id : ''
   const checkedAtText = typeof snap.checkedAt === 'string' ? snap.checkedAt : ''
-  const invalid = (reason: string, cause: InvalidCause): FactAssessment =>
-    build(id, 'invalid', 'withhold', null, reason, checkedAtText, fns, cause)
+  const invalid = (reason: string, cause: InvalidCause): Pending =>
+    build(id, 'invalid', 'withhold', null, reason, checkedAtText, cause)
 
   // Configuration first: a wrong type here is a programmer error and throws,
   // whatever the data looks like.
@@ -233,7 +248,6 @@ function assessOne(
         ageDays,
         `Expired: now is ${boundary === 'exclusive' ? 'after' : 'at or after'} expiresAt ${snap.expiresAt as string}.`,
         checkedAtText,
-        fns,
       )
     }
   }
@@ -244,10 +258,10 @@ function assessOne(
   }
   const level = levelForAge(ageDays, thresholds)
   if (level === 'fresh') {
-    return build(id, level, 'show', ageDays, `Checked ${dayCount(ageDays)} ago, within ${dayCount(thresholds.warnAfterDays)}.`, checkedAtText, fns)
+    return build(id, level, 'show', ageDays, `Checked ${dayCount(ageDays)} ago, within ${dayCount(thresholds.warnAfterDays)}.`, checkedAtText)
   }
   if (level === 'aging') {
-    return build(id, level, 'caveat', ageDays, `Checked ${dayCount(ageDays)} ago, past ${dayCount(thresholds.warnAfterDays)}.`, checkedAtText, fns)
+    return build(id, level, 'caveat', ageDays, `Checked ${dayCount(ageDays)} ago, past ${dayCount(thresholds.warnAfterDays)}.`, checkedAtText)
   }
   const staleDisplay = policy?.staleDisplay ?? defaults?.staleDisplay ?? 'caveat'
   return build(
@@ -257,7 +271,6 @@ function assessOne(
     ageDays,
     `Checked ${dayCount(ageDays)} ago, past ${dayCount(thresholds.staleAfterDays)}.`,
     checkedAtText,
-    fns,
   )
 }
 
@@ -301,7 +314,7 @@ export function assessFact(
   const current = readClock(now)
   const readDefaults = readPolicy(defaults, 'defaults')
   const fns = readLabels(labels)
-  return assessOne(fact, current, readDefaults, fns)
+  return render(assessOne(fact, current, readDefaults), fns)
 }
 
 /**
@@ -325,10 +338,13 @@ export function assessFacts(
   const length = facts.length
   const list: DatedFact[] = []
   for (let i = 0; i < length; i++) {
-    if (!(i in facts)) throw new TypeError(`assessFacts: facts[${i}] is a hole in a sparse array.`)
+    if (!Object.hasOwn(facts, i)) throw new TypeError(`assessFacts: facts[${i}] is a hole in a sparse array.`)
     list.push(facts[i] as DatedFact)
   }
-  const results = list.map((fact) => assessOne(fact, current, readDefaults, fns))
+  // Judge every fact before any label callback runs: a callback cannot change a later verdict,
+  // and a bad policy on a later fact throws before any callback has run.
+  const pending = list.map((fact) => assessOne(fact, current, readDefaults))
+  const results = pending.map((p) => render(p, fns))
   const counts: Record<FactLevel, number> = { fresh: 0, aging: 0, stale: 0, expired: 0, invalid: 0 }
   let worst: FactAssessment | null = null
   for (const result of results) {

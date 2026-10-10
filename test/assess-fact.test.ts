@@ -330,6 +330,41 @@ describe('assessFacts', () => {
   })
 })
 
+describe('assessFacts review fixes', () => {
+  it('callback isolation: a label callback cannot change a later fact verdict', () => {
+    const first = fact({ id: 'first', checkedAt: daysAgo(1) })
+    const second = fact({ id: 'second', checkedAt: daysAgo(90), policy: { warnAfterDays: 14, staleAfterDays: 45, staleDisplay: 'withhold' } })
+    const labels = {
+      fresh: () => {
+        second.checkedAt = daysAgo(1)
+        return 'x'
+      },
+    }
+    const r = assessFacts([first, second], NOW, DEFAULTS, labels)
+    expect(r.results[1]).toMatchObject({ id: 'second', level: 'stale', display: 'withhold', ageDays: 90 })
+    expect(r.counts).toEqual({ fresh: 1, aging: 0, stale: 1, expired: 0, invalid: 0 })
+  })
+
+  it('callback isolation: no label callback runs when a later fact has a bad policy', () => {
+    let calls = 0
+    const labels = { fresh: () => { calls += 1; return 'x' } }
+    const bad = fact({ id: 'bad', policy: 5 as never })
+    expect(() => assessFacts([fact({ id: 'ok' }), bad], NOW, DEFAULTS, labels)).toThrow(TypeError)
+    expect(calls).toBe(0)
+  })
+
+  it('sparse check: an entry inherited from the prototype is a hole, not a fact', () => {
+    const inherited = fact({ id: 'inherited' })
+    const sparse = new Array<DatedFact>(1)
+    ;(Array.prototype as unknown as Record<string, unknown>)['0'] = inherited
+    try {
+      expect(() => assessFacts(sparse, NOW, DEFAULTS)).toThrow(TypeError)
+    } finally {
+      delete (Array.prototype as unknown as Record<string, unknown>)['0']
+    }
+  })
+})
+
 describe('assessFact never throws on bad data (property test)', () => {
   // A small deterministic generator so a failure is reproducible.
   function lcg(seed: number): () => number {
