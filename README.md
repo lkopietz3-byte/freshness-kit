@@ -165,8 +165,17 @@ console.log(dataset.records.map((r) => [r.id, r.result.level, r.result.ageDays])
 // [ [ 'omaha', 'fresh', 13 ], [ 'lisbon', 'stale', 92 ], [ 'austin', 'fresh', 3 ] ]
 ```
 
-`oldest` is the record with the largest `ageDays`; if several tie, the first of
-them in input order.
+`oldest` is the record with the largest `ageDays`. Records with the same
+whole-day age are ordered by their exact review time, earliest first (so the
+record that is really older wins); if the times are also identical, the first
+in input order wins. A tie never changes `dataset.level`, because equal ages
+always get the same level.
+
+Each row in `dataset.records` is the extra fields you passed, plus `id`,
+`reviewedOn` and the computed `result`. The computed fields win: a field of
+yours named `result` is replaced. A field of yours named `level` is kept as
+your own extra and is not the verdict; read the computed level from
+`row.result.level`.
 
 Use `dataset.level` to gate a whole build (fail CI, or show a site-wide
 banner), and `dataset.records` to flag individual rows instead — or both.
@@ -206,8 +215,15 @@ furthest-ahead zone in the IANA database). A bare date that has already
 started somewhere on Earth is accepted and reads as age zero; this keeps a
 reviewer who types their own local date from being rejected for part of the
 day just because UTC hasn't reached that date yet. The supplied `now` must
-be an actual `Date` instance with a finite time — a timestamp number, an ISO
-string, or a duck-typed `{ getTime() }` object is rejected, not coerced.
+be an actual `Date` with a finite time, including a `Date` created in another
+realm (a `vm` context or an iframe). A timestamp number, an ISO string, a
+duck-typed `{ getTime() }` object or an object that only claims to be a Date is
+rejected, not coerced.
+
+Age is counted in whole days and floored, so "stale after N days" means more
+than N whole days have passed: at N days and 23 hours the result is still
+`aging`, and it becomes `stale` at N + 1 days. The same holds for
+`warnAfterDays` and `fresh`.
 
 Thresholds must be non-negative safe integers with
 `warnAfterDays <= staleAfterDays`; zero and equal thresholds are allowed. A

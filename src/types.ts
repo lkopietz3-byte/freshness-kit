@@ -77,7 +77,11 @@ export interface FreshnessRecord {
   reviewedOn: string
 }
 
-/** A FreshnessRecord after assessFreshness has been run against it. */
+/**
+ * A FreshnessRecord after assessFreshness has been run against it. The
+ * computed `result` replaces any caller field of that name; read the verdict
+ * from `result.level`, not from a caller extra such as `level`.
+ */
 export interface EvaluatedFreshnessRecord extends FreshnessRecord {
   result: FreshnessResult
 }
@@ -90,9 +94,10 @@ export interface DatasetFreshnessResult {
   /** The worst (least fresh) level across every record. 'fresh' for an empty dataset. */
   level: FreshnessLevel
   /**
-   * The single oldest record driving `level` (ties broken by largest
-   * ageDays). `undefined` for an empty dataset — there is no oldest record
-   * in a dataset with no records.
+   * The single oldest record driving `level`: the largest `ageDays`, with
+   * equal whole-day ages broken by the earlier exact review time, then input
+   * order. `undefined` for an empty dataset; there is no oldest record in a
+   * dataset with no records.
    */
   oldest: EvaluatedFreshnessRecord | undefined
   /** Every input record, each with its own computed result, in input order. */

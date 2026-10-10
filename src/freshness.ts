@@ -48,14 +48,22 @@ export function readFreshnessContext(config: FreshnessConfig, now: Date): Freshn
 }
 
 function readNow(now: Date): number {
-  // `instanceof Date` first: a plain number, string, or duck-typed
-  // `{ getTime() }` object must not slip through property-access coercion
-  // (calling a missing `.getTime` throws TypeError, not our RangeError; a
-  // Date-shaped fake would otherwise pass silently).
-  if (!(now instanceof Date)) throw new RangeError('Freshness now must be a valid Date.')
+  // Brand check, not `instanceof Date`: a Date from another realm (a vm
+  // context, an iframe) is a real Date but fails `instanceof`. A plain number,
+  // string or duck-typed `{ getTime() }` object must not slip through (calling
+  // a missing `.getTime` throws TypeError, not our RangeError; a Date-shaped
+  // fake would otherwise pass silently).
   let timestamp: unknown
   try {
-    // One read. A Proxy around a Date passes `instanceof` but throws here.
+    // Inside the try: a revoked Proxy throws on either check.
+    if (!(now instanceof Date) && Object.prototype.toString.call(now) !== '[object Date]') {
+      throw new RangeError('Freshness now must be a valid Date.')
+    }
+    // Either check above can be fooled (a Symbol.toStringTag, a Proxy around a
+    // Date), so the intrinsic getTime must accept the value too: it throws
+    // unless the value has the internal Date slot, from any realm.
+    Date.prototype.getTime.call(now)
+    // One read. A subclass override is honored; a non-number is rejected below.
     timestamp = now.getTime()
   } catch (cause) {
     throw new RangeError('Freshness now must be a valid Date.', { cause })
@@ -114,19 +122,28 @@ export function ageInDays(reviewedOn: string, now: Date = new Date()): number {
 
 /** Internal: `ageInDays` against a clock that is already validated and read. */
 function ageAt(reviewedOn: string, current: number): number {
+  return measure(reviewedOn, current).ageDays
+}
+
+function measure(reviewedOn: string, current: number): { ageDays: number; instant: number } {
   const { instant, dateOnly } = parseReviewedOn(reviewedOn)
   const latestAllowed = dateOnly ? current + MAX_UTC_OFFSET_MS : current
   if (instant > latestAllowed) throw new RangeError('reviewedOn must not be in the future.')
-  return Math.max(0, Math.floor((current - instant) / MS_PER_DAY))
+  return { ageDays: Math.max(0, Math.floor((current - instant) / MS_PER_DAY)), instant }
 }
 
 const LEVELS: readonly FreshnessLevel[] = ['fresh', 'aging', 'stale']
 
+/** "1 day" or "N days", for the default messages. */
+function dayCount(ageDays: number): string {
+  return `${ageDays} ${ageDays === 1 ? 'day' : 'days'}`
+}
+
 const defaultMessages: Record<FreshnessLevel, FreshnessMessageFn> = {
   fresh: () => '',
-  aging: (ageDays) => `This information was last checked ${ageDays} days ago.`,
+  aging: (ageDays) => `This information was last checked ${dayCount(ageDays)} ago.`,
   stale: (ageDays) =>
-    `This information was last checked ${ageDays} days ago and may be out of date. Verify before relying on it.`,
+    `This information was last checked ${dayCount(ageDays)} ago and may be out of date. Verify before relying on it.`,
 }
 
 /** The caller's message overrides after validation: only real functions, read once. */
@@ -177,12 +194,19 @@ export function readMessages(messages: FreshnessMessages | undefined): Freshness
   return fns
 }
 
-/** Internal: the level and whole-day age of one review date, against an already-read context. No callbacks run. */
-export function classify(reviewedOn: string, context: FreshnessContext): { level: FreshnessLevel; ageDays: number } {
-  const ageDays = ageAt(reviewedOn, context.current)
+/**
+ * Internal: the level and whole-day age of one review date, against an
+ * already-read context, plus the review instant (epoch ms) for tie-breaking.
+ * No callbacks run.
+ */
+export function classify(
+  reviewedOn: string,
+  context: FreshnessContext,
+): { level: FreshnessLevel; ageDays: number; instant: number } {
+  const { ageDays, instant } = measure(reviewedOn, context.current)
   const level: FreshnessLevel =
     ageDays > context.staleAfterDays ? 'stale' : ageDays > context.warnAfterDays ? 'aging' : 'fresh'
-  return { level, ageDays }
+  return { level, ageDays, instant }
 }
 
 /** Internal: the reader-facing message for a classified date. The callback must return a string. */
@@ -207,7 +231,9 @@ export function renderMessage(
  *
  * Level boundaries: 'fresh' through and including warnAfterDays, 'aging'
  * from warnAfterDays + 1 through and including staleAfterDays, 'stale' from
- * staleAfterDays + 1 on.
+ * staleAfterDays + 1 on. Age is floored to whole days, so "stale after N days"
+ * means more than N whole days have passed: at N days and 23 hours the result
+ * is still 'aging'.
  *
  * `config`, `messages` and `now` are each read once. `messages` must be
  * `undefined` or a plain object whose `fresh`/`aging`/`stale` entries are

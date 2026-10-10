@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The default aging and stale messages say "1 day ago" instead of "1 days ago".
+  Every other count is unchanged, and custom message functions still receive
+  the plain number.
+- A `Date` created in another realm (a `vm` context or an iframe) is accepted as
+  the `now` clock when its time is valid. It was rejected because the check was
+  `instanceof Date`. The check is now a brand check: the value must carry the
+  internal Date slot, so an object that only sets `Symbol.toStringTag`, a Proxy
+  around a Date, a number, a string and a duck-typed `{ getTime() }` object are
+  still rejected with `RangeError`.
+
+### Changed (behavior)
+
+- `checkDatasetFreshness` picks `oldest` by exact review time when two records
+  have the same whole-day age. Before, the first of them in input order won, even
+  if a later record was hours older. Records with identical review times still
+  keep input order. `dataset.level` and every `ageDays` are unchanged, because
+  equal ages always share a level.
+
+### Documented
+
+- "Stale after N days" means more than N whole days have passed. Age is floored,
+  so a record 45 days and 23 hours old is still `aging` with
+  `staleAfterDays: 45`. Behavior is unchanged.
+- Dataset rows: the computed `result` always wins over a caller field of the
+  same name. A caller field named `level` is kept as the caller's own extra and
+  is not the verdict; use `row.result.level`. Behavior is unchanged.
+- The `now` argument may be a real `Date` from any realm.
+
 ## [0.2.1] - 2026-10-07
 
 No change to the library's behavior or API.
