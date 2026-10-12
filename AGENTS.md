@@ -1,4 +1,4 @@
-# freshness-kit — agent instructions
+# freshness-kit: agent instructions
 
 Make staleness self-announcing: compute a fresh/aging/stale level from a reviewed-on date against two declared thresholds, with three-state reader-facing degradation (silent, quiet note, prominent warning) instead of a page that just keeps showing old data with a straight face. Zero-dependency, framework-agnostic TypeScript.
 
@@ -31,4 +31,5 @@ See [docs/REVIEW_READINESS.md](docs/REVIEW_READINESS.md) for review cadence, dec
 
 - Preserve strict real-date and clock validation before arithmetic. Bare dates retain the documented 14-hour future tolerance and age-zero floor; explicit-offset timestamps are exact instants with zero future tolerance. Keep inclusive threshold boundaries.
 - Validate and snapshot every record and configuration once before invoking message callbacks; reject sparse/malformed datasets and abort on any invalid record. Never recover an error by synthesizing fresh, and never treat an empty dataset as completeness proof.
+- `assessFact` must fail closed: bad data is `invalid` and `withhold`, never `fresh`, and never a throw. Do not widen the date grammar to make a case pass; improve the `reason` instead.
 - Keep freshness claims limited to age since the caller-supplied review date. The package does not verify content accuracy, render a UI, schedule reviews or persist data; callers must make invalid inputs visibly fail rather than hide them behind a badge.

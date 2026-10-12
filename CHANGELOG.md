@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - unreleased
+
+New request-time API (`assessFact`, `assessFacts`), plus two small behavior
+changes to existing output.
+
+### Breaking changes
+
+- The default aging and stale messages now say "1 day ago" where they said
+  "1 days ago". Migration: if a test, snapshot or string comparison matched the
+  old text, update it. A custom message function still receives the plain number.
+- `checkDatasetFreshness` can pick a different `oldest` record when two records
+  have the same whole-day age: the one with the earlier exact review time now
+  wins, where the first in input order won before. Migration: if you relied on
+  input order to break such a tie, sort the records first. `dataset.level` and
+  every `ageDays` are unchanged.
+
 ### Added
 
 - `assessFact(fact, now, defaults?, labels?)` and `assessFacts(facts, now, defaults?, labels?)`:
@@ -26,7 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `assessFacts` adds `results`, `worst` and `counts`.
   - New types: `DatedFact`, `FactAssessment`, `FactsAssessment`, `FactLevel`,
     `FactDisplay`, `FactPolicy`, `FactLabelFn`, `FactLabels`.
-  - Existing exports and behavior are unchanged.
+  - When a date is rejected, the `reason` names what is wrong with it: more than
+    three fractional-second digits (database timestamps), a space instead of
+    `T` (git and Postgres text), no timezone, no seconds, an offset without a
+    colon, a month-only or year-only value, lowercase `t` or `z`, surrounding
+    whitespace, an impossible calendar date or an out-of-range time. The
+    grammar itself is unchanged and stays strict.
+  - Existing exports are unchanged.
 
 ### Fixed
 
@@ -50,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documented
 
+- README: a check date means the day someone confirmed the fact, not a post,
+  release or commit date; recipes for turning database timestamps, git dates,
+  month-only values and nullable columns into accepted input; and a list of
+  what `assessFact` does not do (no "expires soon" state, no "ended, date
+  unknown" state, bare-date `expiresAt` is UTC midnight, no clock-skew grace
+  for timestamps, neutral `label` wording, `boundary` is set per fact, nulls
+  versus `undefined`). Behavior is unchanged.
+- The README opening says who the library is for and what it does not do.
 - "Stale after N days" means more than N whole days have passed. Age is floored,
   so a record 45 days and 23 hours old is still `aging` with
   `staleAfterDays: 45`. Behavior is unchanged.
@@ -184,7 +214,7 @@ First release.
   silently treated as age zero or a fresh result.
 - A bare `YYYY-MM-DD` date carries no time zone, so it is accepted (and
   reads as age zero) as long as it is not later than today in every civil
-  time zone — its UTC midnight may be up to 14 hours ahead of `now`. A
+  time zone: its UTC midnight may be up to 14 hours ahead of `now`. A
   timestamp with an explicit offset is an exact instant and has no such
   allowance: it throws if it is even one millisecond after `now`.
 - Zero runtime dependencies. ESM only.

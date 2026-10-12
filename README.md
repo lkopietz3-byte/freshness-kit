@@ -4,10 +4,18 @@
 
 A small TypeScript library that converts a caller-supplied review date and age thresholds into `fresh`, `aging`, or `stale` indicators. It helps a product show how long ago information was reviewed; it does not determine whether that information is still true.
 
+It is for developers who already keep a trustworthy checked date next to each
+record (a directory listing, an offer, a price, a support-end date) and want one
+consistent, fail-closed decision at render time: show it, show it with a
+caveat, or withhold it. It does not verify content, find dates in prose or
+files, parse messy date formats, send reminders, schedule reviews or store
+anything. The date you hand it has to mean "someone checked this on this day";
+a post, release or commit date does not (see "What counts as a check date").
+
 ## Start here
 
-Most products that show verified-at-a-point-in-time data — an offer, a
-price, a fact sheet, a directory listing, a benchmark, a score — degrade
+Most products that show verified-at-a-point-in-time data (an offer, a
+price, a fact sheet, a directory listing, a benchmark, a score) degrade
 silently. The underlying facts drift out of date, but the page doesn't know
 that happened. It just keeps rendering the same content with the same
 visual confidence it had on day one. Nothing forces anyone to notice; the
@@ -16,18 +24,18 @@ quietly stale.
 
 The fix this library encodes: store a `reviewedOn` date next to the data
 (not buried in a commit message or a changelog nobody reads), declare two
-thresholds in days, and compute a level — `'fresh' | 'aging' | 'stale'` —
+thresholds in days, and compute a level (`'fresh' | 'aging' | 'stale'`)
 every time the page renders. Each level maps to a different amount of
 honesty:
 
-- **fresh** — render nothing. The data is current enough not to need a
+- **fresh**: render nothing. The data is current enough not to need a
   caveat.
-- **aging** — a quiet note. The data is probably still fine, but a careful
+- **aging**: a quiet note. The data is probably still fine, but a careful
   reader should know it isn't brand new.
-- **stale** — a prominent, visible warning. Do not let a reader assume this
+- **stale**: a prominent, visible warning. Do not let a reader assume this
   is current.
 
-**dbt's source-freshness feature is the fair, well-known comparison here** —
+**dbt's source-freshness feature is the fair, well-known comparison here**:
 `warn_after` / `error_after` thresholds on a source table, with a non-zero
 exit code past `error_after` that fails a pipeline run. The core mechanism
 (declared thresholds, a warn tier and a harder tier past it) is not new and
@@ -36,8 +44,8 @@ declared source-freshness thresholds for years, and if all you need is "fail
 CI when data is too old," dbt's `freshness:` block already does that well.
 What's more specific to this pattern is applying the same threshold idea to
 individual **dataset or record** freshness with a **three-state,
-reader-facing degradation** — silent when fresh, a quiet note when aging, a
-prominent visible warning when stale — rather than only failing a build
+reader-facing degradation** (silent when fresh, a quiet note when aging, a
+prominent visible warning when stale) rather than only failing a build
 pipeline. A dbt freshness check protects the warehouse; this library
 protects the page a person is actually looking at, whether or not anything
 upstream ever re-runs.
@@ -46,7 +54,7 @@ upstream ever re-runs.
 
 - You need to verify the *content* is still correct, not just measure how
   long it's been since someone said they checked it. This library never
-  looks at the data itself — see Honest limits below.
+  looks at the data itself, see Honest limits below.
 - You need more than two thresholds, non-linear tiers, or per-record-type
   rules. Build on `ageInDays` directly instead of `assessFreshness`.
 - You already have a warehouse-level freshness gate (dbt's `freshness:`
@@ -55,6 +63,9 @@ upstream ever re-runs.
   a reader-facing signal at render time, not just a CI exit code.
 - Your `reviewedOn` values aren't trustworthy inputs (nobody actually updates
   them). This library can't tell a genuine re-check from a bumped date.
+- Your dates come out of a database or an API in mixed shapes (microsecond
+  timestamps, month-only values, prose). The grammar here is strict on purpose,
+  so you would write a small normalizer first; see "Adapting real data".
 
 ## Install
 
@@ -90,7 +101,7 @@ npm run build
 ## Example: a single piece of data
 
 Say a product page shows a fact that someone verifies by hand every so
-often — a spec sheet, a price, a policy summary. You know the date it was
+often (a spec sheet, a price, a policy summary). You know the date it was
 last checked; you don't want the page to keep showing it with a straight
 face forever.
 
@@ -104,7 +115,7 @@ const config: FreshnessConfig = {
 
 // The 4th argument is the clock to measure age against; it defaults to
 // `new Date()`. It's pinned here so this example's output is exact and
-// reproducible — in your own code you'll normally omit it.
+// reproducible. In your own code you'll normally omit it.
 const result = assessFreshness('2026-06-01', config, undefined, new Date('2026-08-02T12:00:00Z'))
 // {
 //   level: 'stale',
@@ -178,7 +189,7 @@ your own extra and is not the verdict; read the computed level from
 `row.result.level`.
 
 Use `dataset.level` to gate a whole build (fail CI, or show a site-wide
-banner), and `dataset.records` to flag individual rows instead — or both.
+banner), and `dataset.records` to flag individual rows instead, or both.
 If any record has invalid input, the entire call throws `RangeError`; it
 does not return a partial dataset or a `fresh` fallback. That includes a
 sparse array: a hole such as `new Array(1)` or `[a, , b]` throws
@@ -245,15 +256,19 @@ Rules, in the order they are applied (first match wins):
    (`YYYY-MM-DD`, or an ISO timestamp with seconds and an explicit timezone),
    an `expiresAt` of `null`, or a `checkedAt` in the future beyond the kit's
    grace (14 hours for a bare date, none for a timestamp) all give level
-   `invalid`, display `withhold`, `ageDays: null` and a plain `reason`. It
-   fails closed: at request time the safe answer is to withhold.
+   `invalid`, display `withhold`, `ageDays: null` and a plain `reason`. For a
+   date that is rejected, the `reason` names what is wrong with it (for example
+   "it has 6 fractional digits" or "it has no timezone"). It fails closed: at
+   request time the safe answer is to withhold.
 2. **A reached `expiresAt` is `expired` and withheld.** `boundary` decides
    whether exactly-at counts. The default, `'inclusive'`, withholds AT the
    instant (show only while `now < expiresAt`). `'exclusive'` still shows AT
    the instant and withholds from the next millisecond (`now <= expiresAt`).
    A bare-date `expiresAt` means UTC midnight at the start of that date, so
    `2026-10-10` withholds from 2026-10-10T00:00:00Z. Use one rule everywhere
-   and you never compare `<` in one place and `<=` in another.
+   and you never compare `<` in one place and `<=` in another. `boundary` is a
+   property of the fact; setting it on `defaults` or inside a `policy` does
+   nothing.
 3. **No thresholds is `invalid`.** The kit has no built-in thresholds. Pass
    `defaults`, or give the fact a `policy`; otherwise a fact that has not
    expired cannot be aged and is withheld.
@@ -296,6 +311,88 @@ fractional, or `warnAfterDays` above `staleAfterDays`) throw the same
 `RangeError` as `assessFreshness`. A fact whose fields cannot be read (a
 getter that throws, a revoked proxy) is `invalid`, not a crash.
 
+### What counts as a check date
+
+`checkedAt` has to be the day someone looked at the fact and confirmed it. A
+blog post date, a release date, a "last modified" stamp or a git commit date
+usually is not that: it records when the text was written or the file was
+touched, not when anyone re-verified it. Feed one of those in and the verdict
+will look plausible while meaning little: a page can be old and still correct,
+or new and wrong. The same goes for a date stamped on every record in one bulk
+edit. The kit cannot tell, and every record will age together.
+
+If you do not have a real check date, do not substitute another one. Either
+record the review (a column, a field, a line in a data file) or leave the fact
+out of `assessFact`.
+
+### Adapting real data
+
+The date grammar is strict and the kit ships no parser for other formats. When
+a date arrives in another shape, `assessFact` withholds the fact and the
+`reason` says why. Convert it first. Three common cases:
+
+```ts
+// 1. A timestamp that carries a zone, in any shape Date can read
+//    (Postgres timestamptz, Go RFC3339Nano, '2026-09-29 17:14:38 -0700').
+//    Do not use this for a value with NO zone: Date would assume the
+//    server's local zone.
+function toCheckedAt(value: string): string {
+  try {
+    return new Date(value).toISOString() // '2026-08-28T23:42:27.123Z'
+  } catch {
+    return value // leave it as it is; assessFact withholds it and says why
+  }
+}
+
+// 2. A month-only value such as '2026-07': the kit will not guess a day.
+//    Choosing the first of the month is the cautious option, because it
+//    makes the fact look as old as it could be.
+const checkedAtFromMonth = (month: string): string => `${month}-01`
+
+// 3. A nullable column: pass nothing, not null.
+const fact: DatedFact = {
+  id: row.id,
+  checkedAt: toCheckedAt(row.checked_at),
+  source: row.source_url,
+  expiresAt: row.expires_at ?? undefined,
+  policy: row.policy ?? undefined,
+}
+```
+
+### What assessFact does not do
+
+These are limits to plan around, not bugs. Each one has a safe default.
+
+- **A null is not the same as nothing.** `expiresAt: null` is `invalid` and
+  withheld, on purpose, so a missing deadline column cannot quietly mean
+  "never expires". `policy: null`, a `null` entry in the `facts` list, or a
+  `facts` list with a hole throws `TypeError`, because those are mistakes in
+  your code, not bad data. Map nulls to `undefined` and drop empty rows
+  before the call, as in the example above.
+- **There is no "expires soon" state.** A fact with an `expiresAt` ten days
+  away is `fresh` and shown until the instant it expires. If you want a
+  warning, compare `expiresAt` to `now` yourself and add your own caveat.
+- **There is no "ended, date unknown" state.** A record that is known to have
+  ended without a date should not go through `assessFact`; render it as ended
+  in your own code. Do not invent a past `expiresAt`, which would claim
+  precision you do not have.
+- **"Valid through October 31" needs a time zone.** A bare-date `expiresAt` of
+  `2026-10-31` withholds from the start of that day in UTC, which is the evening
+  of October 30 in the US. To keep a fact visible through the whole local day,
+  give the start of the next local day with an offset, such as
+  `2026-11-01T00:00:00-05:00`.
+- **A timestamp ahead of your clock is withheld.** A `checkedAt` timestamp
+  even one millisecond after `now` is `invalid`, so a writer whose clock runs a
+  few minutes fast will have its rows withheld. Sync the clocks, or store the
+  date part only: a bare date gets 14 hours of tolerance.
+- **`label` is neutral wording.** An `aging` or `stale` fact reads
+  "Checked 101 days ago", the same pattern as a fresh one. Decide what to render
+  from `display`, and pass your own `labels` (for example a `stale` label that
+  says "May be out of date") if you show the label alone.
+- **`id` is only echoed.** A missing or non-string `id` comes back as `''` and
+  is not an error. `assessFacts` keeps input order, so join results back by
+  position when ids may be missing.
+
 `assessFacts(facts, now, defaults?, labels?)` runs `assessFact` over a list
 with one clock read and returns `{ results, worst, counts }`. `results` keeps
 input order. `worst` is the least trustworthy result, ranked `invalid`,
@@ -317,7 +414,7 @@ Accepted strings are a real `YYYY-MM-DD` calendar date (UTC midnight), or
 Fractions have one to three digits. Hours are 00–23; minutes/seconds 00–59.
 Non-ISO formats, surrounding whitespace, a lowercase `t`/`z`, timestamps
 without a timezone, missing seconds, 24:00, and leap seconds are all
-rejected — as is anything that isn't a JavaScript string, such as an array
+rejected, and so is anything that isn't a JavaScript string, such as an array
 or a boxed `String` object, even one that would print as a valid date.
 
 Future dates are handled differently depending on whether the input carries
@@ -326,8 +423,8 @@ tolerance: it's compared to `now` by instant (so a calendar date printed as
 "tomorrow" with an offset like `+14:00` can still resolve to an instant that
 isn't in the future), but it throws if that instant is even one millisecond
 after `now`. A bare `YYYY-MM-DD` date carries no zone at all, so instead it's
-rejected only when it's later than today in *every* civil time zone — that
-is, when its UTC midnight is more than 14 hours after `now` (UTC+14 is the
+rejected only when it's later than today in *every* civil time zone (that
+is, when its UTC midnight is more than 14 hours after `now`; UTC+14 is the
 furthest-ahead zone in the IANA database). A bare date that has already
 started somewhere on Earth is accepted and reads as age zero; this keeps a
 reviewer who types their own local date from being rejected for part of the
@@ -346,7 +443,7 @@ Thresholds must be non-negative safe integers with
 `warnAfterDays <= staleAfterDays`; zero and equal thresholds are allowed. A
 `config` that isn't an object (including `null`/`undefined`) is rejected the
 same way. Dataset calls validate thresholds and the clock even for an empty
-array, and `records` itself must be an array of objects — a non-array or a
+array, and `records` itself must be an array of objects: a non-array or a
 `null`/non-object element throws instead of crashing. An empty valid dataset
 still returns `fresh` with no oldest record; that means no stale records
 were found, and is not proof that required data exists.
@@ -412,8 +509,8 @@ context and the TSDoc on each symbol for the full contract.
 - **`freshnessBadgeText(result: FreshnessResult): string`**
   Turns a `FreshnessResult` into a short plain-text badge: `''` when fresh,
   `Reviewed 20d ago` when aging, `Stale — last reviewed 62d ago` when stale.
-  Trusts its input — see the badge section below for the trust boundary.
-- **Types** — `FreshnessLevel` (`'fresh' | 'aging' | 'stale'`), `FreshnessConfig`
+  Trusts its input; see the badge section below for the trust boundary.
+- **Types:** `FreshnessLevel` (`'fresh' | 'aging' | 'stale'`), `FreshnessConfig`
   (`{ warnAfterDays, staleAfterDays }`), `FreshnessResult`
   (`{ level, ageDays, reviewedOn, message }`), `FreshnessMessageFn`
   (`(ageDays, reviewedOn) => string`, must return a string), `FreshnessMessages` (a `Partial` map
@@ -474,7 +571,7 @@ The same assessment can be used when rendering a page. Choose thresholds that fi
 - **`reviewedOn` is only as honest as whoever sets it.** Nothing stops a
   person (or a script) from bumping the date without actually re-checking
   anything. A fresh-looking date next to stale content isn't caught by
-  anything in this library — pair it with a real review process, not just
+  anything in this library. Pair it with a real review process, not just
   a field that's easy to touch.
 - **No scheduling, no notifications, no storage.** `assessFreshness` and
   `checkDatasetFreshness` are pure functions of the inputs you pass them.
@@ -499,6 +596,10 @@ The same assessment can be used when rendering a page. Choose thresholds that fi
   tiers, different tiers per record type, or non-linear rules, you'll need
   to build on top of `ageInDays` directly rather than use `assessFreshness`
   as-is.
+- **Messy dates are your job.** The kit reads one strict date grammar and does
+  not extract dates from text, files or other formats. A fact whose date it
+  cannot read is withheld with a reason, not guessed at. See "Adapting real
+  data".
 - **The future-date check trusts the `now` you pass it.** The 14-hour bare-
   date allowance covers real time-zone ambiguity, not a general clock-skew
   budget. If the caller's clock itself is wrong by more than that, a
@@ -546,4 +647,6 @@ test/
   callbacks.test.ts     Message function and messages-argument contract
   messages-and-boundaries.test.ts  Error wording, format anchors, calendar edges
   assess-fact.test.ts   assessFact verdict table, property test, time-zone child processes
+  date-reasons.test.ts  Why each rejected date is rejected, normalizer recipe, documented limits
+  verdict-table.test.ts Named regression rows for dataset and clock behavior
 ```
