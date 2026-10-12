@@ -158,6 +158,67 @@ function snapshot(fact: DatedFact): FactSnapshot {
   }
 }
 
+const ACCEPTED_DATES =
+  'Accepted: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss[.sss] followed by Z or an offset like +00:00.'
+
+// Loose enough to recognize the common near-misses (database timestamps, git
+// dates, partial times) so the reason can name what is wrong with them.
+const LOOSE_DATE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:([Tt ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?( ?)(Z|z|[+-]\d{2}(?::?\d{2})?)?)?$/
+
+/**
+ * Internal: say which part of a rejected date is wrong. The grammar itself
+ * stays strict (`parseReviewedOn` decides); this only explains a rejection so
+ * an adopter can fix the input or write a normalizer. Never throws.
+ */
+function explainDate(field: string, value: unknown): string {
+  if (typeof value !== 'string') {
+    return `${field} is not a string (received ${typeName(value)}). ${ACCEPTED_DATES}`
+  }
+  if (value === '') return `${field} is empty. ${ACCEPTED_DATES}`
+  const problems: string[] = []
+  if (value.trim() !== value) problems.push('it has leading or trailing whitespace')
+  const text = value.trim()
+  if (/^\d{4}(?:-\d{2})?$/.test(text)) {
+    problems.push('it is a partial date (a year or a month only), so give a full YYYY-MM-DD and choose the day yourself')
+  } else {
+    const m = LOOSE_DATE.exec(text)
+    if (m === null) {
+      problems.push('it is not an ISO date or timestamp')
+    } else {
+      const [, y, mo, d, sep, hh, , ss, fraction, gap, zone] = m
+      if (sep === 't') problems.push('use an uppercase T between the date and the time')
+      if (sep === ' ') problems.push('it has a space between the date and the time (use T)')
+      if (hh !== undefined) {
+        if (ss === undefined) problems.push('it has no seconds')
+        if (fraction !== undefined && fraction.length > 3) {
+          problems.push(`it has ${fraction.length} fractional digits (at most 3 are accepted, so round to milliseconds or drop the fraction)`)
+        }
+        if (zone === undefined) {
+          problems.push('it has no timezone (add Z or an offset like +00:00)')
+        } else {
+          if (zone === 'z') problems.push('use an uppercase Z')
+          if (gap === ' ') problems.push('it has a space before the offset')
+          if (/^[+-]\d{4}$/.test(zone)) problems.push(`the offset needs a colon (${zone.slice(0, 3)}:${zone.slice(3)}, not ${zone})`)
+          if (/^[+-]\d{2}$/.test(zone)) problems.push(`the offset needs minutes and a colon (${zone}:00, not ${zone})`)
+        }
+      }
+      const year = Number(y)
+      const month = Number(mo)
+      const day = Number(d)
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+      const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+      if (month < 1 || month > 12 || day < 1 || day > monthDays[month - 1]!) {
+        problems.push('it is not a real calendar date')
+      }
+      if (problems.length === 0) {
+        problems.push('a time or offset is out of range (hours 00-23, minutes and seconds 00-59, offset hours 00-23)')
+      }
+    }
+  }
+  return `${field} is not a valid date: ${problems.join('; ')}. ${ACCEPTED_DATES}`
+}
+
 function defaultLabel(level: FactLevel, ageDays: number | null, cause: InvalidCause): string {
   switch (level) {
     case 'fresh':
@@ -241,7 +302,7 @@ function assessOne(
     if (typeof snap.checkedAt !== 'string') throw new RangeError('not a string')
     checked = parseReviewedOn(snap.checkedAt)
   } catch {
-    return invalid('checkedAt is not a valid date. Use YYYY-MM-DD or an ISO timestamp with seconds and a timezone.', 'date')
+    return invalid(explainDate('checkedAt', snap.checkedAt), 'date')
   }
   let expiresInstant: number | undefined
   if (snap.expiresAt !== undefined) {
@@ -249,7 +310,7 @@ function assessOne(
       if (typeof snap.expiresAt !== 'string') throw new RangeError('not a string')
       expiresInstant = parseReviewedOn(snap.expiresAt).instant
     } catch {
-      return invalid('expiresAt is not a valid date. Use YYYY-MM-DD or an ISO timestamp with seconds and a timezone.', 'date')
+      return invalid(explainDate('expiresAt', snap.expiresAt), 'date')
     }
   }
   if (isAheadOfClock(checked, current)) {
@@ -305,7 +366,9 @@ function assessOne(
  * 1. A missing or blank `source`, an unparseable `checkedAt` or `expiresAt`,
  *    or a `checkedAt` in the future beyond the kit's grace (14 hours for a
  *    bare date, none for a timestamp) gives level 'invalid', display
- *    'withhold'. This fails closed.
+ *    'withhold'. This fails closed. For an unparseable date the `reason`
+ *    names what is wrong (fraction digits, separator, timezone, offset form,
+ *    partial date); the grammar itself is not widened.
  * 2. `expiresAt` reached gives 'expired' and 'withhold'. `boundary` picks
  *    whether exactly-at counts: 'inclusive' (the default) withholds AT the
  *    instant, 'exclusive' shows AT it and withholds from the next
