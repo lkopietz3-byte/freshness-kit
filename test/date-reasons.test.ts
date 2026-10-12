@@ -113,6 +113,56 @@ describe('what a normalizer recipe produces is accepted', () => {
   })
 })
 
+// The README recipes, kept here so they cannot drift from what the kit accepts.
+function toCheckedAt(value: string): string {
+  try {
+    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2})/.exec(value)
+    if (m === null) return value
+    const [year, month, day, hour] = m.slice(1).map(Number) as [number, number, number, number]
+    const utc = new Date(Date.UTC(year, month - 1, day))
+    if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day || hour > 23) return value
+    return new Date(value).toISOString()
+  } catch {
+    return value
+  }
+}
+
+const checkedAtFromMonth = (month: string): string => `${month}-01`
+
+describe('the README adapter recipes', () => {
+  it('turns zoned database and git shapes into accepted input', () => {
+    for (const shape of ['2026-08-28 23:42:27.123456+00', '2026-08-28T23:42:27.123456+00:00', '2026-08-28 16:42:27 -0700']) {
+      const a = assessFact({ id: 'r', checkedAt: toCheckedAt(shape), source: 's' }, NOW, POLICY)
+      expect(a.level, shape).toBe('aging')
+    }
+  })
+
+  it('leaves impossible calendar days and hours for the kit to reject', () => {
+    for (const bad of ['2026-02-30T12:00:00Z', '2026-09-29T24:00:00Z', '2026-13-01T00:00:00Z', 'garbage']) {
+      expect(toCheckedAt(bad)).toBe(bad)
+      expect(assessFact({ id: 'r', checkedAt: toCheckedAt(bad), source: 's' }, NOW, POLICY).level, bad).toBe('invalid')
+    }
+  })
+
+  it('builds a fact from a nullable row by leaving null fields out', () => {
+    const row = { id: 'a', checked_at: '2026-10-01', source_url: 's', expires_at: null as string | null, policy: null as FactPolicy | null }
+    const fact: DatedFact = {
+      id: row.id,
+      checkedAt: toCheckedAt(row.checked_at),
+      source: row.source_url,
+      ...(row.expires_at != null && { expiresAt: row.expires_at }),
+      ...(row.policy != null && { policy: row.policy }),
+    }
+    expect(Object.keys(fact)).toEqual(['id', 'checkedAt', 'source'])
+    expect(assessFact(fact, NOW, POLICY).level).toBe('fresh')
+  })
+
+  it('a month-only value becomes the first of the month', () => {
+    const a = assessFact({ id: 'm', checkedAt: checkedAtFromMonth('2026-07'), source: 's' }, NOW, { warnAfterDays: 60, staleAfterDays: 120 })
+    expect(a).toMatchObject({ level: 'aging', ageDays: 101 })
+  })
+})
+
 describe('pinned behavior the README documents as limits', () => {
   it('a three-minute clock skew on a timestamp is withheld (no grace for timestamps)', () => {
     const a = assessFact({ id: 'p', checkedAt: '2026-08-30T17:30:00.000Z', source: 's' }, new Date('2026-08-30T17:27:00Z'), POLICY)

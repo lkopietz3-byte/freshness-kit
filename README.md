@@ -335,9 +335,16 @@ a date arrives in another shape, `assessFact` withholds the fact and the
 // 1. A timestamp that carries a zone, in any shape Date can read
 //    (Postgres timestamptz, Go RFC3339Nano, '2026-09-29 17:14:38 -0700').
 //    Do not use this for a value with NO zone: Date would assume the
-//    server's local zone.
+//    server's local zone. Date also rolls some impossible values forward
+//    ('2026-02-30' becomes March 2, '24:00' becomes the next midnight), so
+//    check the calendar day and the hour first.
 function toCheckedAt(value: string): string {
   try {
+    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2})/.exec(value)
+    if (m === null) return value
+    const [year, month, day, hour] = m.slice(1).map(Number) as [number, number, number, number]
+    const utc = new Date(Date.UTC(year, month - 1, day))
+    if (utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day || hour > 23) return value
     return new Date(value).toISOString() // '2026-08-28T23:42:27.123Z'
   } catch {
     return value // leave it as it is; assessFact withholds it and says why
@@ -349,13 +356,15 @@ function toCheckedAt(value: string): string {
 //    makes the fact look as old as it could be.
 const checkedAtFromMonth = (month: string): string => `${month}-01`
 
-// 3. A nullable column: pass nothing, not null.
+// 3. A nullable column: leave the field out, do not pass null or undefined.
+//    (undefined is treated as absent at runtime, but it is a type error
+//    under exactOptionalPropertyTypes.)
 const fact: DatedFact = {
   id: row.id,
   checkedAt: toCheckedAt(row.checked_at),
   source: row.source_url,
-  expiresAt: row.expires_at ?? undefined,
-  policy: row.policy ?? undefined,
+  ...(row.expires_at != null && { expiresAt: row.expires_at }),
+  ...(row.policy != null && { policy: row.policy }),
 }
 ```
 
@@ -367,8 +376,8 @@ These are limits to plan around, not bugs. Each one has a safe default.
   withheld, on purpose, so a missing deadline column cannot quietly mean
   "never expires". `policy: null`, a `null` entry in the `facts` list, or a
   `facts` list with a hole throws `TypeError`, because those are mistakes in
-  your code, not bad data. Map nulls to `undefined` and drop empty rows
-  before the call, as in the example above.
+  your code, not bad data. Leave a null field out of the fact, and drop
+  empty rows before the call, as in the example above.
 - **There is no "expires soon" state.** A fact with an `expiresAt` ten days
   away is `fresh` and shown until the instant it expires. If you want a
   warning, compare `expiresAt` to `now` yourself and add your own caveat.
