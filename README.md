@@ -577,6 +577,10 @@ The same assessment can be used when rendering a page. Choose thresholds that fi
   answers "how long has it been since someone looked at this," never "is
   this still true." Verifying the content itself is a separate,
   domain-specific problem this library deliberately does not attempt.
+- **`Checked today` means under 24 hours, not the same calendar day.** The
+  age is floored to whole days, so a timestamp from 23:00 yesterday UTC reads
+  `Checked today` at noon the next day. If your readers need calendar-day
+  wording, pass your own `messages` and compare the dates yourself.
 - **`reviewedOn` is only as honest as whoever sets it.** Nothing stops a
   person (or a script) from bumping the date without actually re-checking
   anything. A fresh-looking date next to stale content isn't caught by
