@@ -15,9 +15,17 @@ import { classify, readFreshnessContext, readMessages, renderMessage } from './f
  * can gate a build on, while still returning every per-record result so a
  * caller can instead (or also) flag individual rows.
  *
- * `oldest` is the record with the largest `ageDays`; when several share it,
- * the first of them in input order. With one shared config the level never
- * decreases as age grows, so that record always also has the worst level.
+ * `oldest` is the record with the largest `ageDays`. Records that share the
+ * same whole-day age are ordered by their exact review instant, earliest
+ * first; if the instants are also equal, the first in input order wins. With
+ * one shared config the level never decreases as age grows, so that record
+ * always also has the worst level (a tie on `ageDays` has the same level, so
+ * the tie-break never changes `level`).
+ *
+ * Each row is the caller's own extra fields plus `id`, `reviewedOn` and the
+ * computed `result`. The computed fields always win: a caller field named
+ * `result` is replaced, and a caller field named `level` is just passed
+ * through as a caller extra; the computed level is only ever `row.result.level`.
  *
  * An empty `records` array returns `level: 'fresh'` and `oldest: undefined`
  * — there is nothing stale about a dataset with nothing in it. That is not
@@ -85,6 +93,8 @@ export function checkDatasetFreshness(
   // Classify every record before any message callback runs.
   const classified = snapshot.map((record) => ({ record, ...classify(record.reviewedOn, context) }))
 
+  // Caller extras are spread first so the computed `result` always wins over a
+  // caller field of the same name.
   const evaluated: EvaluatedFreshnessRecord[] = classified.map(({ record, level, ageDays }) => ({
     ...record,
     result: {
@@ -95,10 +105,21 @@ export function checkDatasetFreshness(
     },
   }))
 
+  // Largest whole-day age wins; a tie on whole days goes to the earlier review
+  // instant (the exactly older record); a full tie keeps the first in input order.
   let oldest: EvaluatedFreshnessRecord | undefined
-  for (const record of evaluated) {
-    if (oldest === undefined || record.result.ageDays > oldest.result.ageDays) oldest = record
-  }
+  let oldestInstant = Infinity
+  evaluated.forEach((record, index) => {
+    const instant = classified[index]!.instant
+    if (
+      oldest === undefined ||
+      record.result.ageDays > oldest.result.ageDays ||
+      (record.result.ageDays === oldest.result.ageDays && instant < oldestInstant)
+    ) {
+      oldest = record
+      oldestInstant = instant
+    }
+  })
 
   return {
     level: oldest?.result.level ?? 'fresh',

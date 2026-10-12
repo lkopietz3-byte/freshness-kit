@@ -5,10 +5,19 @@
 // local assert stands in.
 import {
   ageInDays,
+  assessFact,
+  assessFacts,
   assessFreshness,
   checkDatasetFreshness,
   freshnessBadgeText,
   type DatasetFreshnessResult,
+  type DatedFact,
+  type FactAssessment,
+  type FactDisplay,
+  type FactLabels,
+  type FactLevel,
+  type FactPolicy,
+  type FactsAssessment,
   type EvaluatedFreshnessRecord,
   type FreshnessConfig,
   type FreshnessLevel,
@@ -49,5 +58,19 @@ const oldest: EvaluatedFreshnessRecord | undefined = dataset.oldest;
 assertEqual(dataset.level, 'stale', 'dataset level');
 assertEqual(oldest?.id, 'b', 'dataset oldest id');
 assertEqual(dataset.records.length, 2, 'dataset records length');
+
+const policy: FactPolicy = { ...config, staleDisplay: 'withhold' };
+const dated: DatedFact = { id: 'price', checkedAt: '2026-06-01', source: 'https://example.com', policy, boundary: 'exclusive' };
+const labels: FactLabels = { expired: () => 'Ended' };
+const assessment: FactAssessment = assessFact(dated, now, config, labels);
+const factLevel: FactLevel = assessment.level;
+const display: FactDisplay = assessment.display;
+const ageOrNull: number | null = assessment.ageDays;
+assertEqual(factLevel, 'stale', 'assessFact level');
+assertEqual(display, 'withhold', 'assessFact display');
+assertEqual(ageOrNull, 62, 'assessFact ageDays');
+const roll: FactsAssessment = assessFacts([dated, { id: 'x', checkedAt: 'bad', source: '' }], now, config);
+assertEqual(roll.counts.invalid, 1, 'assessFacts counts');
+assertEqual(roll.worst?.id, 'x', 'assessFacts worst');
 
 console.log('consumer-probe.mts: type probe assembled without error');
