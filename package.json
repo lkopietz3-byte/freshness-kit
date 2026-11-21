@@ -1,7 +1,7 @@
 {
   "name": "freshness-kit",
-  "version": "0.3.0",
-  "description": "Make staleness self-announcing: compute a fresh/aging/stale level from a reviewed-on date against two declared thresholds, with three-state reader-facing degradation (silent, quiet note, prominent warning) instead of a page that just keeps showing old data with a straight face. Zero-dependency, framework-agnostic TypeScript.",
+  "version": "0.3.1",
+  "description": "Use two age limits to mark a supplied review date as fresh, aging, or stale. Get a note or warning for readers when the date is old.",
   "keywords": [
     "data-freshness",
     "staleness",
