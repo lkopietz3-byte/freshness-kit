@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-20
+
+Documentation only. The package code and API are the same as 0.3.0.
+
+### Changed
+
+- The packaged CHANGELOG dates every release. The 0.3.0 package listed its own version as unreleased.
+- A shorter package description that npm shows in full.
+
 ## [0.3.0] - 2026-10-12
 
 New request-time API (`assessFact`, `assessFacts`), plus two small behavior
